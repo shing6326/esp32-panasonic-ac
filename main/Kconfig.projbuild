@@ -1,0 +1,39 @@
+menu "Panasonic CZ-TACG1"
+
+config PANASONIC_UART_TX_GPIO
+    int "UART TX GPIO (ESP TX -> AC RX)"
+    default 5
+    range 0 30
+    help
+        GPIO that drives the air conditioner RX line through a 3.3 V to 5 V
+        level shifter. ESP32-C6 and ESP32-H2 devkits can use the default.
+
+config PANASONIC_UART_RX_GPIO
+    int "UART RX GPIO (ESP RX <- AC TX)"
+    default 8
+    range 0 30
+    help
+        GPIO that receives the air conditioner TX line through the level shifter.
+
+config PANASONIC_FACTORY_RESET_GPIO
+    int "Factory reset button GPIO (active low)"
+    default 9
+    range 0 30
+    help
+        Hold this pin low for 5 seconds to leave the Zigbee network.
+        GPIO9 is the BOOT button on most ESP32-C6 and ESP32-H2 boards.
+
+config PANASONIC_INDOOR_OFFSET
+    int "Indoor temperature offset (degree C)"
+    default 0
+    range -10 10
+    help
+        Added to the indoor temperature reported by the AC, and subtracted
+        from the target temperature sent to the AC.
+
+config PANASONIC_OUTDOOR_OFFSET
+    int "Outdoor temperature offset (degree C)"
+    default 0
+    range -10 10
+
+endmenu
