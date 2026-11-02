@@ -651,9 +651,7 @@ extern "C" void app_main(void)
                                     (int8_t)CONFIG_PANASONIC_INDOOR_OFFSET, (int8_t)CONFIG_PANASONIC_OUTDOOR_OFFSET,
                                     on_panasonic_state));
 
-    while (true) {
-        esp_zb_main_loop_iteration();
-    }
+    esp_zb_stack_main_loop();
 }
 
 extern "C" void bdb_start_top_level_commissioning_cb(uint8_t mode_mask)

@@ -75,7 +75,7 @@ nanoeX、Eco、ECONAVI、Mild Dry 對應 CZ-TACG1 狀態字裡的獨立欄位。
 
 ## CI
 
-`.github/workflows/ci.yml` 在 pull request 和 `main` 上編譯 ESP32-C6、ESP32-H2，並用 `node --check` 檢查轉換器。只有韌體或轉換器有改動才會跑對應的 job。編譯結果的 bin 會留在 Actions artifact 14 天。
+`.github/workflows/ci.yml` 在 pull request 和 `main` 上編譯 ESP32-C6、ESP32-H2。只有韌體相關檔案有改動才會編譯。編譯結果的 bin 會留在 Actions artifact 14 天。
 
 推上 `v*` tag 時，同一套 image 會附加到 GitHub Release。通過只代表這個版本能連結、而且 app 放得進 640 KB 的 OTA slot，不代表已經在冷氣上驗證過。
 

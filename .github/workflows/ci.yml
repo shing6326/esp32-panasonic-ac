@@ -20,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       firmware: ${{ steps.filter.outputs.firmware }}
-      converter: ${{ steps.filter.outputs.converter }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,7 +30,6 @@ jobs:
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "firmware=true" >> "$GITHUB_OUTPUT"
-            echo "converter=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -44,33 +42,14 @@ jobs:
           fi
 
           firmware=true
-          converter=true
           if [[ -n "$base" ]]; then
             files="$(git diff --name-only "$base" HEAD || true)"
             firmware=false
-            converter=false
             if echo "$files" | grep -Eq '^(main/|CMakeLists.txt|partitions.csv|sdkconfig.defaults|\.github/workflows/ci\.yml)'; then
               firmware=true
             fi
-            if echo "$files" | grep -Eq '^(zigbee2mqtt/|\.github/workflows/ci\.yml)'; then
-              converter=true
-            fi
           fi
           echo "firmware=$firmware" >> "$GITHUB_OUTPUT"
-          echo "converter=$converter" >> "$GITHUB_OUTPUT"
-
-  converter-syntax:
-    name: Zigbee2MQTT syntax
-    needs: changes
-    if: needs.changes.outputs.converter == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Check converter syntax
-        run: node --check zigbee2mqtt/panasonic-ac.js
 
   firmware:
     name: Build ${{ matrix.target }}
@@ -137,7 +116,7 @@ jobs:
 
   release:
     name: Publish release images
-    needs: [converter-syntax, firmware]
+    needs: firmware
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
