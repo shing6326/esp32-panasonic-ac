@@ -75,7 +75,7 @@ Changing the fan speed clears Powerful / Quiet. The ESPHome component does the s
 
 ## CI
 
-`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on pull requests and on `main`. A run starts only when firmware files change. The binaries stay in the Actions artifact for 14 days.
+`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on every pull request and every push to `main`. The binaries stay in the Actions artifact for 14 days.
 
 A `v*` tag attaches the same images to a GitHub Release. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
 
