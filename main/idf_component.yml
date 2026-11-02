@@ -1,3 +1,7 @@
 dependencies:
-  espressif/esp-zigbee-lib: "^1.6.5"
-  espressif/esp-zboss-lib: "*"
+  # Zigbee SDK 1.6.8 is a prebuilt library made on ESP-IDF 5.5.1.
+  # Stay on the 5.5 bugfix line. ESP-IDF 6.0 needs Zigbee SDK 2.x, which is a different API.
+  idf:
+    version: ">=5.5.1,<5.6.0"
+  espressif/esp-zigbee-lib: "1.6.8"
+  espressif/esp-zboss-lib: "1.6.4"

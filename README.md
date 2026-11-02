@@ -38,7 +38,7 @@ GPIO9 是多數開發板的 BOOT 鍵，用來恢復原廠設定。
 
 ## 編譯
 
-需要 ESP-IDF 5.3 或更新，以及支援的目標晶片。Flash 用 2 MB 的分割表，4 MB 模組也可以燒。
+需要 ESP-IDF 5.5.1 到 5.5.x，CI 使用 5.5.6。Zigbee 預編譯庫是 1.6.8，不要改用 ESP-IDF 6.0：那要換成 Zigbee SDK 2.x。Flash 用 2 MB 的分割表，4 MB 模組也可以燒。
 
 ```bash
 . $IDF_PATH/export.sh
@@ -72,6 +72,12 @@ Home Assistant 會出現恆溫器。風速、擺風、Powerful / Quiet、nanoeX 
 nanoeX、Eco、ECONAVI、Mild Dry 對應 CZ-TACG1 狀態字裡的獨立欄位。遙控器沒有該按鍵就不要開，冷氣可能不接受，行為也不確定。
 
 改風速時，Powerful / Quiet 會被清掉。這和原廠 ESPHome 元件一樣，因為這兩個 preset 會蓋過風速。
+
+## CI
+
+`.github/workflows/ci.yml` 在 pull request 和 `main` 上編譯 ESP32-C6、ESP32-H2，並用 `node --check` 檢查轉換器。只有韌體或轉換器有改動才會跑對應的 job。編譯結果的 bin 會留在 Actions artifact 14 天。
+
+推上 `v*` tag 時，同一套 image 會附加到 GitHub Release。通過只代表這個版本能連結、而且 app 放得進 640 KB 的 OTA slot，不代表已經在冷氣上驗證過。
 
 ## OTA
 
