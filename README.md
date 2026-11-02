@@ -1,84 +1,84 @@
-# ESP32 Zigbee Panasonic 冷氣（CZ-TACG1）
+# ESP32 Zigbee Panasonic AC (CZ-TACG1)
 
-用 ESP32-C6 或 ESP32-H2 取代 Panasonic **CZ-TACG1** Wi-Fi 模組。模組接室內機 **CN-CNT** UART，自己以 Zigbee router 加入網絡，再用 Zigbee2MQTT / Home Assistant 控制冷氣。
+Replace the Panasonic **CZ-TACG1** Wi-Fi module with an ESP32-C6 or ESP32-H2. The board connects to the indoor unit **CN-CNT** UART, joins the network as a Zigbee router, and is controlled through Zigbee2MQTT / Home Assistant.
 
-只支援 CZ-TACG1 / CN-CNT。不支援 DNSK-P11 / CN-WLAN。
+Supported protocol: CZ-TACG1 / CN-CNT. DNSK-P11 / CN-WLAN is out of scope.
 
-UART 協定來自 [esphome-panasonic-ac](https://github.com/DomiStyle/esphome-panasonic-ac) 的 CNT 實作。Zigbee thermostat、router、恢復原廠設定和 OTA 的做法參考 [esp32-midea-ac](https://github.com/pirsasha/esp32-midea-ac)。
+The UART protocol comes from the CNT implementation in [esphome-panasonic-ac](https://github.com/DomiStyle/esphome-panasonic-ac). The Zigbee thermostat, router role, factory reset, and OTA client follow [esp32-midea-ac](https://github.com/pirsasha/esp32-midea-ac).
 
-## 功能
+## Features
 
-- 開關、自動、冷凍、製熱、抽濕、送風
-- 目標溫度 16–30°C，步進 0.5°C。設定溫度時如果冷氣是關的，會一併開機，並沿用上次模式
-- 風速 auto / 1 / 2 / 3 / 4 / 5
-- 上下、左右、同時擺動，以及風向固定位置
-- Powerful、Quiet
-- 室內溫度、室外溫度
-- nanoeX、Eco、ECONAVI、Mild Dry（遙控器有這些鍵才可開）
-- 除霜狀態、冷氣回報的估計功率
-- 按住 BOOT 5 秒離開 Zigbee 網絡
+- Power, auto, cool, heat, dry, and fan
+- Target temperature 16–30°C in 0.5°C steps. Setting a temperature while the unit is off turns it on and restores the previous mode
+- Fan speed auto / 1 / 2 / 3 / 4 / 5
+- Vertical, horizontal, and combined swing, plus fixed vane positions
+- Powerful and Quiet
+- Indoor and outdoor temperature
+- nanoeX, Eco, ECONAVI, and Mild Dry (enable only when the remote has that button)
+- Defrost status and the power estimate reported by the AC
+- Hold BOOT for 5 seconds to leave the Zigbee network
 
-## 接線
+## Wiring
 
-斷開冷氣電源再開蓋。主板有市電，不要帶電操作。
+Disconnect mains power before opening the indoor unit. The control board is live at mains voltage.
 
-CN-CNT 是 5 V UART。ESP32 是 3.3 V，TX 和 RX 都要經過雙向電平轉換器。不要把 ESP 的腳直接接到冷氣。
+CN-CNT is a 5 V UART. The ESP32 is 3.3 V, so both TX and RX go through a bidirectional level shifter. Keep the ESP pins off the AC connector.
 
-| 冷氣 CN-CNT | 電平轉換 | ESP32-C6 / H2 |
+| AC CN-CNT | Level shifter | ESP32-C6 / H2 |
 | --- | --- | --- |
 | 5 V | HV | 5 V / VIN |
-| GND | GND（高低壓兩側共地） | GND |
-| RX（收 ESP 的資料） | HV1 ↔ LV1 | GPIO5（TX，可在 menuconfig 改） |
-| TX（送給 ESP 的資料） | HV2 ↔ LV2 | GPIO8（RX，可在 menuconfig 改） |
-| — | LV 的 VCC | 3.3 V |
+| GND | GND (common ground on both sides) | GND |
+| RX (data from the ESP) | HV1 ↔ LV1 | GPIO5 (TX, changeable in menuconfig) |
+| TX (data to the ESP) | HV2 ↔ LV2 | GPIO8 (RX, changeable in menuconfig) |
+| — | LV VCC | 3.3 V |
 
-RX / TX 以 ESP 的方向為準：ESP 的 TX 接到冷氣的 RX。韌體固定 **9600 8E1**（偶校驗），和 CZ-TACG1 原廠模組一樣。
+Directions are from the ESP: ESP TX goes to the AC RX. The firmware uses **9600 8E1** (even parity), the same setting as the original CZ-TACG1 module.
 
-GPIO9 是多數開發板的 BOOT 鍵，用來恢復原廠設定。
+GPIO9 is the BOOT button on most development boards and is used for factory reset.
 
-## 編譯
+## Build
 
-需要 ESP-IDF 5.5.1 到 5.5.x，CI 使用 5.5.6。Zigbee 預編譯庫是 1.6.8，不要改用 ESP-IDF 6.0：那要換成 Zigbee SDK 2.x。Flash 用 2 MB 的分割表，4 MB 模組也可以燒。
+Use ESP-IDF 5.5.1 through 5.5.x. CI builds with 5.5.6. The prebuilt Zigbee library is 1.6.8. ESP-IDF 6.0 needs Zigbee SDK 2.x, which is a different API. The partition table is sized for 2 MB flash and can also be flashed to a 4 MB module.
 
 ```bash
 . $IDF_PATH/export.sh
 cd esp32-panasonic-ac
-idf.py set-target esp32c6    # 或 esp32h2
+idf.py set-target esp32c6    # or esp32h2
 idf.py menuconfig            # Component config -> Panasonic CZ-TACG1
 idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor
 ```
 
-`menuconfig` 可以改 TX、RX、BOOT 腳，以及室內／室外溫度偏移。偏移會加在讀回來的溫度上，設定溫度時會先減掉室內偏移再送給冷氣。
+`menuconfig` sets the TX, RX, and BOOT pins, plus the indoor and outdoor temperature offsets. An offset is added to a temperature read from the AC. The indoor offset is subtracted from the target temperature before it is sent to the AC.
 
-## 加入 Zigbee2MQTT
+## Zigbee2MQTT
 
-1. 把 `zigbee2mqtt/panasonic-ac.js` 複製到 Zigbee2MQTT 的 `data/` 目錄。
-2. 在 `configuration.yaml` 加入：
+1. Copy `zigbee2mqtt/panasonic-ac.js` into the Zigbee2MQTT `data/` directory.
+2. Add this to `configuration.yaml`:
 
 ```yaml
 external_converters:
   - panasonic-ac.js
 ```
 
-3. 重啟 Zigbee2MQTT，打開 Permit join。
-4. 模組上電後會以 router 自動尋網。識別字是 `Panasonic` / `ZB-PANASONIC-AC`。
-5. 若之前入過別的網絡，按住 BOOT（GPIO9）5 秒，它會清掉 Zigbee 資料並重新尋網。
+3. Restart Zigbee2MQTT and enable Permit join.
+4. After power-up the module joins as a router. The identity is `Panasonic` / `ZB-PANASONIC-AC`.
+5. If it was joined to another network, hold BOOT (GPIO9) for 5 seconds. That clears the Zigbee data and starts steering again.
 
-Home Assistant 會出現恆溫器。風速、擺風、Powerful / Quiet、nanoeX 等在同一個設備的其他實體。
+Home Assistant shows a thermostat. Fan speed, swing, Powerful / Quiet, nanoeX, and the other controls appear as additional entities on the same device.
 
-## 不要亂開的功能
+## Optional features
 
-nanoeX、Eco、ECONAVI、Mild Dry 對應 CZ-TACG1 狀態字裡的獨立欄位。遙控器沒有該按鍵就不要開，冷氣可能不接受，行為也不確定。
+nanoeX, Eco, ECONAVI, and Mild Dry map to separate fields in the CZ-TACG1 status bytes. Leave a feature off when the remote has no button for it. The indoor unit may reject the command, and the result is undefined.
 
-改風速時，Powerful / Quiet 會被清掉。這和原廠 ESPHome 元件一樣，因為這兩個 preset 會蓋過風速。
+Changing the fan speed clears Powerful / Quiet. The ESPHome component does the same, because those presets override the fan speed.
 
 ## CI
 
-`.github/workflows/ci.yml` 在 pull request 和 `main` 上編譯 ESP32-C6、ESP32-H2。只有韌體相關檔案有改動才會編譯。編譯結果的 bin 會留在 Actions artifact 14 天。
+`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on pull requests and on `main`. A run starts only when firmware files change. The binaries stay in the Actions artifact for 14 days.
 
-推上 `v*` tag 時，同一套 image 會附加到 GitHub Release。通過只代表這個版本能連結、而且 app 放得進 640 KB 的 OTA slot，不代表已經在冷氣上驗證過。
+A `v*` tag attaches the same images to a GitHub Release. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
 
 ## OTA
 
-Zigbee OTA manufacturer code 是 `0x5041`。ESP32-C6 的 image type 是 `0x0001`，ESP32-H2 是 `0x0002`。韌體版本 `1.0.0` 的數值是 `0x01000000`。
+The Zigbee OTA manufacturer code is `0x5041`. The ESP32-C6 image type is `0x0001`, and the ESP32-H2 image type is `0x0002`. Firmware `1.0.0` is stored as `0x01000000`.
