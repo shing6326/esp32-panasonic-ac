@@ -91,9 +91,9 @@ The first image has to be written over USB. Zigbee OTA can only replace a board 
 
 ## OTA
 
-The Zigbee OTA manufacturer code is `0x5041` (20545). The ESP32-C6 image type is `0x0001`. Firmware `1.0.1` is stored as `0x01000100`. Zigbee2MQTT offers an update only when the file version is greater than the version on the device. A board running `1.0.0` (`0x01000000`) can take `1.0.1`.
+The Zigbee OTA manufacturer code is `0x5041` (20545). The ESP32-C6 image type is `0x0001`. Firmware `1.0.2` is stored as `0x01000200`. Zigbee2MQTT offers an update only when the file version is greater than the version on the device. A board running `1.0.0` (`0x01000000`) or `1.0.1` (`0x01000100`) can take `1.0.2`.
 
-`PROJECT_VER` in `CMakeLists.txt` and `firmware_version` in `main/main.cpp` use the same three bytes. `1.0.1` is `0x01000100`. The release workflow wraps `build/zb_panasonic_ac.bin` into `zb-panasonic-ac-<version>.ota` with manufacturer `0x5041`, image type `0x0001`, and tag `0x0000`. Point Zigbee2MQTT at the index:
+`PROJECT_VER` in `CMakeLists.txt` and `firmware_version` in `main/main.cpp` use the same three bytes. `1.0.2` is `0x01000200`. The release workflow wraps `build/zb_panasonic_ac.bin` into `zb-panasonic-ac-<version>.ota` with manufacturer `0x5041`, image type `0x0001`, and tag `0x0000`. Point Zigbee2MQTT at the index:
 
 ```yaml
 ota:
@@ -103,12 +103,12 @@ ota:
 ```json
 [
   {
-    "url": "https://github.com/shing6326/esp32-panasonic-ac/releases/download/v1.0.1/zb-panasonic-ac-1.0.1.ota",
+    "url": "https://github.com/shing6326/esp32-panasonic-ac/releases/download/v1.0.2/zb-panasonic-ac-1.0.2.ota",
     "manufacturerCode": 20545,
     "imageType": 1,
-    "fileVersion": 16842752
+    "fileVersion": 16777728
   }
 ]
 ```
 
-`16842752` is `0x01000100`. That file is attached to the `v1.0.1` release. `v1.0.0` has no OTA file.
+`16777728` is `0x01000200`. That file is attached to the `v1.0.2` release. `v1.0.0` has no OTA file.
