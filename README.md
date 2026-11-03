@@ -28,8 +28,8 @@ CN-CNT is a 5 V UART. The ESP32 is 3.3 V, so both TX and RX go through a bidirec
 | --- | --- | --- |
 | 5 V | HV | 5 V / VIN |
 | GND | GND (common ground on both sides) | GND |
-| RX (data from the ESP) | HV1 ↔ LV1 | GPIO22 (TX, changeable in menuconfig) |
-| TX (data to the ESP) | HV2 ↔ LV2 | GPIO23 (RX, changeable in menuconfig) |
+| RX (data from the ESP) | HV1 ↔ LV1 | GPIO23 (TX, changeable in menuconfig) |
+| TX (data to the ESP) | HV2 ↔ LV2 | GPIO22 (RX, changeable in menuconfig) |
 | — | LV VCC | 3.3 V |
 
 GPIO8 is a ROM-log strap and GPIO9 is the BOOT strap and the factory-reset button. Keep the level shifter off both pins. A shifter that holds GPIO8 low while the chip resets silences the ROM log.

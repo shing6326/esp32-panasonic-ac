@@ -2,7 +2,7 @@ menu "Panasonic CZ-TACG1"
 
 config PANASONIC_UART_TX_GPIO
     int "UART TX GPIO (ESP TX -> AC RX)"
-    default 22
+    default 23
     range 0 30
     help
         GPIO that drives the air conditioner RX line through a 3.3 V to 5 V
@@ -10,7 +10,7 @@ config PANASONIC_UART_TX_GPIO
 
 config PANASONIC_UART_RX_GPIO
     int "UART RX GPIO (ESP RX <- AC TX)"
-    default 23
+    default 22
     range 0 30
     help
         GPIO that receives the air conditioner TX line through the level shifter.
