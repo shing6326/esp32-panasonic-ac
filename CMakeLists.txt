@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.0.4")
+set(PROJECT_VER "1.0.5")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(zb_panasonic_ac)
