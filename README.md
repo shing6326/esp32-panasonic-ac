@@ -79,7 +79,7 @@ Changing the fan speed clears Powerful / Quiet. The ESPHome component does the s
 
 `.github/workflows/ci.yml` builds the ESP32-C6 firmware on every pull request and every push to `main`, and compiles the host codec test. The binaries stay in the Actions artifact for 14 days.
 
-A `v*` tag attaches a flashable set to a GitHub Release: the app, bootloader, partition table, `ota_data_initial`, and `flash_args_esp32c6`. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
+A `v*` tag attaches a flashable set to a GitHub Release: the app, bootloader, partition table, `ota_data_initial`, `flash_args_esp32c6`, and `zb-panasonic-ac-<version>.ota`. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
 
 Download the release files into one directory and flash them together:
 
@@ -91,9 +91,9 @@ The first image has to be written over USB. Zigbee OTA can only replace a board 
 
 ## OTA
 
-The Zigbee OTA manufacturer code is `0x5041` (20545). The ESP32-C6 image type is `0x0001`. Firmware `1.0.0` is stored as `0x01000000`. Zigbee2MQTT offers an update only when the file version is greater than the version on the device.
+The Zigbee OTA manufacturer code is `0x5041` (20545). The ESP32-C6 image type is `0x0001`. Firmware `1.0.1` is stored as `0x01000100`. Zigbee2MQTT offers an update only when the file version is greater than the version on the device. A board running `1.0.0` (`0x01000000`) can take `1.0.1`.
 
-Bump `PROJECT_VER` in `CMakeLists.txt` and `firmware_version` in `main/main.cpp` together. The displayed version uses the top three bytes, so `1.0.1` is `0x01000100`. Package `build/zb_panasonic_ac.bin` as a Zigbee OTA file with manufacturer `0x5041`, image type `0x0001`, tag `0x0000`, and that file version. Put the `.ota` file on a public URL and list it in a Zigbee2MQTT override index:
+`PROJECT_VER` in `CMakeLists.txt` and `firmware_version` in `main/main.cpp` use the same three bytes. `1.0.1` is `0x01000100`. The release workflow wraps `build/zb_panasonic_ac.bin` into `zb-panasonic-ac-<version>.ota` with manufacturer `0x5041`, image type `0x0001`, and tag `0x0000`. Point Zigbee2MQTT at the index:
 
 ```yaml
 ota:
@@ -111,4 +111,4 @@ ota:
 ]
 ```
 
-`16842752` is `0x01000100`. The release URL above is the shape for a later version; `v1.0.0` does not contain an OTA file.
+`16842752` is `0x01000100`. That file is attached to the `v1.0.1` release. `v1.0.0` has no OTA file.
