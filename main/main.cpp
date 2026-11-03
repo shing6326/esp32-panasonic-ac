@@ -92,7 +92,7 @@ static uint8_t thermostat_system_mode = ESP_ZB_ZCL_THERMOSTAT_SYSTEM_MODE_OFF;
 static uint8_t thermostat_running_mode = 0x00;
 static uint8_t thermostat_ac_type = 0x04;
 static uint8_t thermostat_louver_position = ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED;
-static uint32_t firmware_version = 0x01000200;  // 1.0.2
+static uint32_t firmware_version = 0x01000300;  // 1.0.3
 
 static int16_t celsius_to_zcl(float celsius)
 {

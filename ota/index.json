@@ -1,8 +1,8 @@
 [
   {
-    "url": "https://github.com/shing6326/esp32-panasonic-ac/releases/download/v1.0.2/zb-panasonic-ac-1.0.2.ota",
+    "url": "https://github.com/shing6326/esp32-panasonic-ac/releases/download/v1.0.3/zb-panasonic-ac-1.0.3.ota",
     "manufacturerCode": 20545,
     "imageType": 1,
-    "fileVersion": 16777728
+    "fileVersion": 16777984
   }
 ]
