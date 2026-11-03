@@ -67,14 +67,38 @@ jobs:
           PY
 
       - name: Collect flash files
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
-          target="${{ matrix.target }}"
-          mkdir -p "dist/${target}"
-          cp build/zb_panasonic_ac.bin "dist/${target}/zb_panasonic_ac_${target}.bin"
-          cp build/bootloader/bootloader.bin "dist/${target}/bootloader_${target}.bin"
-          cp build/partition_table/partition-table.bin "dist/${target}/partition-table_${target}.bin"
-          cp build/flasher_args.json "dist/${target}/flasher_args_${target}.json"
-          if [ -f build/flash_args ]; then cp build/flash_args "dist/${target}/flash_args_${target}"; fi
+          python3 - << 'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          target = os.environ["TARGET"]
+          build = Path("build")
+          dist = Path("dist") / target
+          dist.mkdir(parents=True, exist_ok=True)
+          flasher = json.loads((build / "flasher_args.json").read_text())
+          renamed = {}
+          for offset, rel in flasher["flash_files"].items():
+              src = build / rel
+              if not src.is_file():
+                  raise SystemExit(f"missing {src}")
+              dest_name = f"{src.stem}_{target}{src.suffix}"
+              shutil.copy2(src, dist / dest_name)
+              renamed[offset] = dest_name
+          flasher["flash_files"] = renamed
+          for key in ("bootloader", "app", "partition_table"):
+              entry = flasher.get(key)
+              if isinstance(entry, dict) and "file" in entry:
+                  entry["file"] = renamed.get(entry.get("offset"), Path(entry["file"]).name)
+          (dist / f"flasher_args_{target}.json").write_text(json.dumps(flasher, indent=2) + "\n")
+          header = " ".join(flasher.get("write_flash_args", []))
+          body = "\n".join(f"{offset} {name}" for offset, name in renamed.items())
+          (dist / f"flash_args_{target}").write_text(header + "\n" + body + "\n")
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -105,7 +129,18 @@ jobs:
             echo "no firmware files found"
             exit 1
           fi
-          notes="ESP-IDF 5.5.6, esp-zigbee-lib 1.6.8, esp-zboss-lib 1.6.4. The images compiled and linked. They were not flashed or tested against an air conditioner."
+          notes="$(cat <<'EOF'
+          First ESP32-C6 image for the CZ-TACG1 bridge, version 1.0.0.
+
+          Built with ESP-IDF 5.5.6, esp-zigbee-lib 1.6.8, and esp-zboss-lib 1.6.4. The image compiled and fits the OTA slot. It has not been flashed or tested on an air conditioner.
+
+          Flash the whole set from this directory. The app binary alone will not boot.
+
+              esptool.py --chip esp32c6 -p PORT write_flash @flash_args_esp32c6
+
+          Zigbee OTA cannot install this first image. It can only replace a board that is already running this firmware.
+          EOF
+          )"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
