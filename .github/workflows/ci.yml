@@ -115,6 +115,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: firmware-esp32*
@@ -122,27 +123,29 @@ jobs:
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           mapfile -t files < <(find release -type f | sort)
+          printf 'uploading %s file(s)\n' "${#files[@]}"
+          printf '%s\n' "${files[@]}"
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no firmware files found"
             exit 1
           fi
-          notes="$(cat <<'EOF'
-          First ESP32-C6 image for the CZ-TACG1 bridge, version 1.0.0.
-
-          Built with ESP-IDF 5.5.6, esp-zigbee-lib 1.6.8, and esp-zboss-lib 1.6.4. The image compiled and fits the OTA slot. It has not been flashed or tested on an air conditioner.
-
-          Flash the whole set from this directory. The app binary alone will not boot.
-
-              esptool.py --chip esp32c6 -p PORT write_flash @flash_args_esp32c6
-
-          Zigbee OTA cannot install this first image. It can only replace a board that is already running this firmware.
-          EOF
-          )"
+          printf '%s\n' \
+            "First ESP32-C6 image for the CZ-TACG1 bridge, version 1.0.0." \
+            "" \
+            "Built with ESP-IDF 5.5.6, esp-zigbee-lib 1.6.8, and esp-zboss-lib 1.6.4. The image compiled and fits the OTA slot. It has not been flashed or tested on an air conditioner." \
+            "" \
+            "Flash the whole set from the directory that contains flash_args_esp32c6. The app binary alone will not boot." \
+            "" \
+            '    esptool.py --chip esp32c6 -p PORT write_flash @flash_args_esp32c6' \
+            "" \
+            "Zigbee OTA cannot install this first image. It can only replace a board that is already running this firmware." \
+            > release-notes.md
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "$GITHUB_REF_NAME" --notes "$notes"
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
           fi
