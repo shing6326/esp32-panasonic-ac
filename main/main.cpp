@@ -386,6 +386,20 @@ static void remember_on_mode()
     ac_power = true;
 }
 
+extern "C" void publish_attrs_cb(uint8_t)
+{
+    publish_all_attrs(false);
+}
+
+// The set-attribute callback runs inside the Zigbee stack. Updating attributes
+// there calls back into the stack before the write response is sent, and the
+// device stops answering. Publish on the next scheduler turn instead.
+static void schedule_publish()
+{
+    esp_zb_scheduler_alarm_cancel(publish_attrs_cb, 0);
+    esp_zb_scheduler_alarm(publish_attrs_cb, 0, 50);
+}
+
 static void apply_power(bool on)
 {
     taskENTER_CRITICAL(&s_state_mux);
@@ -456,7 +470,7 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
         default:
             break;
         }
-        publish_all_attrs(false);
+        schedule_publish();
         return ESP_OK;
     }
 
@@ -556,7 +570,7 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
         break;
     }
 
-    publish_all_attrs(false);
+    schedule_publish();
     return ESP_OK;
 }
 
