@@ -210,6 +210,13 @@ const toZigbee = {
         },
         convertGet: async (entity) => readAttrs(entity, 'genAnalogInput', [ATTR.mode]),
     },
+    local_temperature: {
+        key: ['local_temperature'],
+        convertSet: async () => {
+            // Home Assistant publishes local_temperature as "" with climate commands.
+            // The indoor temperature comes from the AC and is not writable.
+        },
+    },
     occupied_cooling_setpoint: {
         key: ['occupied_cooling_setpoint', 'occupied_heating_setpoint', 'current_heating_setpoint', 'current_cooling_setpoint'],
         convertSet: async (entity, _key, value) => {
@@ -240,6 +247,7 @@ module.exports = {
     toZigbee: [
         toZigbee.state,
         toZigbee.system_mode,
+        toZigbee.local_temperature,
         toZigbee.occupied_cooling_setpoint,
         toZigbee.fan_mode,
         toZigbee.swing_mode,
