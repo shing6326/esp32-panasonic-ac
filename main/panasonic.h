@@ -75,6 +75,7 @@ struct State {
     VSwing vswing;
     HSwing hswing;
     float set_temp;
+    bool set_valid;
     float indoor_temp;
     float outdoor_temp;
     bool indoor_valid;

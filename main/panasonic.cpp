@@ -1,4 +1,5 @@
 #include "panasonic.h"
+#include "panasonic_codec.h"
 
 #include <string.h>
 #include <math.h>
@@ -26,20 +27,28 @@ static constexpr int64_t SILENCE_WARN_MS = 30000;
 static constexpr uint8_t CTRL_HEADER = 0xF0;
 static constexpr uint8_t POLL_HEADER = 0x70;
 
+static_assert((uint8_t)Mode::Off == pacodec::MODE_OFF, "mode enum");
+static_assert((uint8_t)Mode::Fan == pacodec::MODE_FAN, "mode enum");
+static_assert((uint8_t)Fan::S5 == pacodec::FAN_S5, "fan enum");
+static_assert((uint8_t)Swing::Both == pacodec::SWING_BOTH, "swing enum");
+static_assert((uint8_t)Preset::Quiet == pacodec::PRESET_QUIET, "preset enum");
+static_assert((uint8_t)VSwing::Auto == pacodec::VSWING_AUTO, "vswing enum");
+static_assert((uint8_t)HSwing::Auto == pacodec::HSWING_AUTO, "hswing enum");
+
 enum CmdKind : uint8_t {
-    CMD_POWER = 1,
-    CMD_MODE,
-    CMD_TEMP,
-    CMD_FAN,
-    CMD_SWING,
-    CMD_PRESET,
-    CMD_VSWING,
-    CMD_HSWING,
-    CMD_NANOEX,
-    CMD_ECO,
-    CMD_ECONAVI,
-    CMD_MILD,
-    CMD_POLL,
+    CMD_POWER = pacodec::KIND_POWER,
+    CMD_MODE = pacodec::KIND_MODE,
+    CMD_TEMP = pacodec::KIND_TEMP,
+    CMD_FAN = pacodec::KIND_FAN,
+    CMD_SWING = pacodec::KIND_SWING,
+    CMD_PRESET = pacodec::KIND_PRESET,
+    CMD_VSWING = pacodec::KIND_VSWING,
+    CMD_HSWING = pacodec::KIND_HSWING,
+    CMD_NANOEX = pacodec::KIND_NANOEX,
+    CMD_ECO = pacodec::KIND_ECO,
+    CMD_ECONAVI = pacodec::KIND_ECONAVI,
+    CMD_MILD = pacodec::KIND_MILD,
+    CMD_POLL = pacodec::KIND_POLL,
 };
 
 struct Cmd {
@@ -48,34 +57,8 @@ struct Cmd {
     float f;
 };
 
-static constexpr uint16_t F_POWER = 1u << 0;
-static constexpr uint16_t F_MODE = 1u << 1;
-static constexpr uint16_t F_TEMP = 1u << 2;
-static constexpr uint16_t F_FAN = 1u << 3;
-static constexpr uint16_t F_SWING = 1u << 4;
-static constexpr uint16_t F_PRESET = 1u << 5;
-static constexpr uint16_t F_VSWING = 1u << 6;
-static constexpr uint16_t F_HSWING = 1u << 7;
-static constexpr uint16_t F_NANOEX = 1u << 8;
-static constexpr uint16_t F_ECO = 1u << 9;
-static constexpr uint16_t F_ECONAVI = 1u << 10;
-static constexpr uint16_t F_MILD = 1u << 11;
-
-struct Desired {
-    uint16_t mask;
-    bool power;
-    uint8_t mode;
-    float temp;
-    uint8_t fan;
-    uint8_t swing;
-    uint8_t preset;
-    uint8_t vswing;
-    uint8_t hswing;
-    bool nanoex;
-    bool eco;
-    bool econavi;
-    bool mild;
-};
+static constexpr int kMaxOps = 16;
+static constexpr int64_t kCmdHoldMs = 800;
 
 static QueueHandle_t g_queue = nullptr;
 static state_cb_t g_cb = nullptr;
@@ -83,8 +66,10 @@ static int8_t g_indoor_offset = 0;
 static int8_t g_outdoor_offset = 0;
 static uint8_t g_shadow[10] = {};
 static bool g_shadow_valid = false;
-static Desired g_desired = {};
+static Cmd g_ops[kMaxOps] = {};
+static int g_ops_n = 0;
 static bool g_poll_asap = false;
+static int64_t g_cmd_ms = 0;
 
 static int64_t now_ms()
 {
@@ -109,89 +94,34 @@ static esp_err_t enqueue(uint8_t kind, uint8_t u8, float f)
 
 static void capture(const Cmd &cmd)
 {
-    switch (cmd.kind) {
-    case CMD_POWER:
-        g_desired.mask |= F_POWER;
-        g_desired.power = cmd.u8 != 0;
-        break;
-    case CMD_MODE:
-        g_desired.mask |= F_MODE;
-        g_desired.mode = cmd.u8;
-        break;
-    case CMD_TEMP:
-        g_desired.mask |= F_TEMP;
-        g_desired.temp = cmd.f;
-        break;
-    case CMD_FAN:
-        g_desired.mask |= F_FAN;
-        g_desired.fan = cmd.u8;
-        break;
-    case CMD_SWING:
-        g_desired.mask |= F_SWING;
-        g_desired.swing = cmd.u8;
-        break;
-    case CMD_PRESET:
-        g_desired.mask |= F_PRESET;
-        g_desired.preset = cmd.u8;
-        break;
-    case CMD_VSWING:
-        g_desired.mask |= F_VSWING;
-        g_desired.vswing = cmd.u8;
-        break;
-    case CMD_HSWING:
-        g_desired.mask |= F_HSWING;
-        g_desired.hswing = cmd.u8;
-        break;
-    case CMD_NANOEX:
-        g_desired.mask |= F_NANOEX;
-        g_desired.nanoex = cmd.u8 != 0;
-        break;
-    case CMD_ECO:
-        g_desired.mask |= F_ECO;
-        g_desired.eco = cmd.u8 != 0;
-        break;
-    case CMD_ECONAVI:
-        g_desired.mask |= F_ECONAVI;
-        g_desired.econavi = cmd.u8 != 0;
-        break;
-    case CMD_MILD:
-        g_desired.mask |= F_MILD;
-        g_desired.mild = cmd.u8 != 0;
-        break;
-    case CMD_POLL:
+    if (cmd.kind == CMD_POLL) {
         g_poll_asap = true;
-        break;
-    default:
-        break;
+        return;
     }
+    if (g_ops_n >= kMaxOps) {
+        memmove(g_ops, g_ops + 1, sizeof(Cmd) * (kMaxOps - 1));
+        g_ops_n = kMaxOps - 1;
+    }
+    g_ops[g_ops_n++] = cmd;
 }
 
 static void send_frame(uint8_t header, const uint8_t *payload, size_t len, bool log_info)
 {
     uint8_t frame[16];
-    if (len + 3 > sizeof(frame)) {
+    size_t n = pacodec::build_frame(header, payload, len, frame, sizeof(frame));
+    if (n == 0) {
         return;
     }
 
-    frame[0] = header;
-    frame[1] = (uint8_t)len;
-    memcpy(frame + 2, payload, len);
-
-    uint8_t sum = 0;
-    for (size_t i = 0; i < len + 2; i++) {
-        sum += frame[i];
-    }
-    frame[len + 2] = (uint8_t)(0 - sum);
-
-    uart_write_bytes(UART, frame, len + 3);
+    uart_write_bytes(UART, frame, n);
     uart_wait_tx_done(UART, pdMS_TO_TICKS(100));
 
     if (log_info) {
         ESP_LOGI(TAG, "TX control");
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, len + 3, ESP_LOG_INFO);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, n, ESP_LOG_INFO);
     } else {
         ESP_LOGD(TAG, "TX poll");
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, len + 3, ESP_LOG_DEBUG);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, n, ESP_LOG_DEBUG);
     }
 }
 
@@ -206,11 +136,7 @@ static bool verify_packet(const uint8_t *data, size_t len)
     if (data[1] != len - 3) {
         return false;
     }
-    uint8_t sum = 0;
-    for (size_t i = 0; i < len; i++) {
-        sum += data[i];
-    }
-    return sum == 0;
+    return pacodec::checksum_ok(data, len);
 }
 
 static Mode mode_from_nibble(uint8_t nib)
@@ -227,7 +153,7 @@ static Mode mode_from_nibble(uint8_t nib)
     case 0x06:
         return Mode::Fan;
     default:
-        ESP_LOGW(TAG, "unknown mode nibble 0x%X", nib);
+        ESP_LOGD(TAG, "unknown mode nibble 0x%X", nib);
         return Mode::Auto;
     }
 }
@@ -248,7 +174,7 @@ static Fan fan_from_byte(uint8_t speed)
     case 0x70:
         return Fan::S5;
     default:
-        ESP_LOGW(TAG, "unknown fan 0x%02X", speed);
+        ESP_LOGD(TAG, "unknown fan 0x%02X", speed);
         return Fan::Auto;
     }
 }
@@ -356,9 +282,10 @@ static State parse_state(const uint8_t *frame, size_t len)
     st.eco = g_shadow[8] == 0x40;
     st.mild_dry = g_shadow[2] == 0x7F;
 
-    float set_temp = g_shadow[1] * 0.5f + (float)g_indoor_offset;
-    if (set_temp <= 100.0f && set_temp >= 0.0f) {
-        st.set_temp = set_temp;
+    float raw_set = g_shadow[1] * 0.5f;
+    if (raw_set >= 16.0f && raw_set <= 30.0f) {
+        st.set_temp = raw_set + (float)g_indoor_offset;
+        st.set_valid = true;
     }
 
     st.indoor_valid = read_sensor(frame, len, 18, g_indoor_offset, &st.indoor_temp) ||
@@ -372,13 +299,13 @@ static State parse_state(const uint8_t *frame, size_t len)
     }
     if (len > 30) {
         int32_t raw = (int32_t)frame[28] + ((int32_t)frame[29] << 8);
-        st.power_w = (float)(raw - (int32_t)(int8_t)frame[30]);
+        st.power_w = (float)(raw - (int32_t)frame[30]);
         st.power_valid = true;
     }
     return st;
 }
 
-static bool handle_rx(const uint8_t *data, size_t len)
+static bool handle_rx(const uint8_t *data, size_t len, int64_t now)
 {
     ESP_LOGD(TAG, "RX %u bytes", (unsigned)len);
     ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_DEBUG);
@@ -392,15 +319,26 @@ static bool handle_rx(const uint8_t *data, size_t len)
         return false;
     }
 
-    memcpy(g_shadow, data + 2, 10);
-    g_shadow_valid = true;
+    // A poll that was already in flight can arrive just after a command. Keep the
+    // command image for a short window so the late poll does not undo it. Queued
+    // commands are replayed on top of a newer poll, so a remote change still wins
+    // as the base image.
+    bool hold_command = g_ops_n == 0 && g_cmd_ms != 0 && now - g_cmd_ms < kCmdHoldMs;
+    if (!hold_command) {
+        memcpy(g_shadow, data + 2, 10);
+        g_shadow_valid = true;
+    }
 
     State st = parse_state(data, len);
     static State prev = {};
     bool changed = !prev.valid || prev.power_on != st.power_on || prev.mode != st.mode || prev.fan != st.fan ||
-                   prev.swing != st.swing || prev.preset != st.preset || prev.set_temp != st.set_temp ||
-                   prev.nanoex != st.nanoex || prev.eco != st.eco || prev.econavi != st.econavi ||
-                   prev.mild_dry != st.mild_dry || prev.defrost != st.defrost;
+                   prev.swing != st.swing || prev.preset != st.preset || prev.vswing != st.vswing ||
+                   prev.hswing != st.hswing || prev.set_valid != st.set_valid || prev.set_temp != st.set_temp ||
+                   prev.indoor_valid != st.indoor_valid || prev.indoor_temp != st.indoor_temp ||
+                   prev.outdoor_valid != st.outdoor_valid || prev.outdoor_temp != st.outdoor_temp ||
+                   prev.power_valid != st.power_valid || prev.power_w != st.power_w || prev.nanoex != st.nanoex ||
+                   prev.eco != st.eco || prev.econavi != st.econavi || prev.mild_dry != st.mild_dry ||
+                   prev.defrost != st.defrost;
     prev = st;
     if (changed) {
         ESP_LOGI(TAG, "power=%d mode=%u fan=%u swing=%u preset=%u set=%.1f in=%.1f out=%.1f",
@@ -414,186 +352,19 @@ static bool handle_rx(const uint8_t *data, size_t len)
     return true;
 }
 
-static uint8_t mode_byte(uint8_t mode)
-{
-    switch ((Mode)mode) {
-    case Mode::Cool:
-        return 0x34;
-    case Mode::Heat:
-        return 0x44;
-    case Mode::Dry:
-        return 0x24;
-    case Mode::Fan:
-        return 0x64;
-    case Mode::Auto:
-        return 0x04;
-    case Mode::Off:
-    default:
-        return 0x00;
-    }
-}
-
-static uint8_t fan_byte(uint8_t fan)
-{
-    switch ((Fan)fan) {
-    case Fan::S1:
-        return 0x30;
-    case Fan::S2:
-        return 0x40;
-    case Fan::S3:
-        return 0x50;
-    case Fan::S4:
-        return 0x60;
-    case Fan::S5:
-        return 0x70;
-    case Fan::Auto:
-    default:
-        return 0xA0;
-    }
-}
-
-static uint8_t swing_byte(uint8_t swing)
-{
-    switch ((Swing)swing) {
-    case Swing::Both:
-        return 0xFD;
-    case Swing::Vertical:
-        return 0xF6;
-    case Swing::Horizontal:
-        return 0x3D;
-    case Swing::Off:
-    default:
-        return 0x36;
-    }
-}
-
-static uint8_t vswing_high(uint8_t swing)
-{
-    switch ((VSwing)swing) {
-    case VSwing::Down:
-        return 0x50;
-    case VSwing::DownCenter:
-        return 0x40;
-    case VSwing::UpCenter:
-        return 0x20;
-    case VSwing::Up:
-        return 0x10;
-    case VSwing::Swing:
-        return 0xE0;
-    case VSwing::Auto:
-        return 0xF0;
-    case VSwing::Center:
-    case VSwing::Unknown:
-    default:
-        return 0x30;
-    }
-}
-
-static uint8_t hswing_low(uint8_t swing)
-{
-    switch ((HSwing)swing) {
-    case HSwing::Left:
-        return 0x09;
-    case HSwing::LeftCenter:
-        return 0x0A;
-    case HSwing::RightCenter:
-        return 0x0B;
-    case HSwing::Right:
-        return 0x0C;
-    case HSwing::Auto:
-        return 0x0D;
-    case HSwing::Center:
-    case HSwing::Unknown:
-    default:
-        return 0x06;
-    }
-}
-
-static uint8_t preset_low(uint8_t preset)
-{
-    switch ((Preset)preset) {
-    case Preset::Powerful:
-        return 0x02;
-    case Preset::Quiet:
-        return 0x04;
-    case Preset::None:
-    default:
-        return 0x00;
-    }
-}
-
 static bool build_control(uint8_t cmd[10])
 {
-    if (!g_shadow_valid) {
+    if (!g_shadow_valid || g_ops_n == 0) {
         return false;
     }
     memcpy(cmd, g_shadow, 10);
-
-    if (g_desired.mask & F_MODE) {
-        if ((Mode)g_desired.mode == Mode::Off) {
-            cmd[0] &= 0xF0;
-        } else {
-            cmd[0] = mode_byte(g_desired.mode);
+    bool changed = false;
+    for (int i = 0; i < g_ops_n; i++) {
+        if (pacodec::apply_op(cmd, g_ops[i].kind, g_ops[i].u8, g_ops[i].f, g_indoor_offset)) {
+            changed = true;
         }
     }
-    if (g_desired.mask & F_TEMP) {
-        float c = g_desired.temp - (float)g_indoor_offset;
-        if (c < 16.0f) {
-            c = 16.0f;
-        } else if (c > 30.0f) {
-            c = 30.0f;
-        }
-        int raw = (int)lroundf(c * 2.0f);
-        if (raw < 32) {
-            raw = 32;
-        } else if (raw > 60) {
-            raw = 60;
-        }
-        cmd[1] = (uint8_t)raw;
-    }
-    if (g_desired.mask & F_FAN) {
-        // Powerful / Quiet replaces the fan speed, same as the ESPHome component.
-        if ((cmd[5] & 0x0F) != 0 && (g_desired.mask & F_PRESET) == 0) {
-            cmd[5] &= 0xF0;
-        }
-        cmd[3] = fan_byte(g_desired.fan);
-    }
-    if (g_desired.mask & F_PRESET) {
-        cmd[5] = (uint8_t)((cmd[5] & 0xF0) | preset_low(g_desired.preset));
-    }
-    if (g_desired.mask & F_SWING) {
-        cmd[4] = swing_byte(g_desired.swing);
-    }
-    if ((g_desired.mask & F_VSWING) != 0 && (VSwing)g_desired.vswing != VSwing::Unknown) {
-        cmd[4] = (uint8_t)((cmd[4] & 0x0F) + vswing_high(g_desired.vswing));
-    }
-    if ((g_desired.mask & F_HSWING) != 0 && (HSwing)g_desired.hswing != HSwing::Unknown) {
-        cmd[4] = (uint8_t)((cmd[4] & 0xF0) + hswing_low(g_desired.hswing));
-    }
-    // Byte 5 is a bitfield: low nibble preset, 0x10 ECONAVI, 0x40 nanoeX.
-    if (g_desired.mask & F_NANOEX) {
-        uint8_t keep = cmd[5] & 0x1F;
-        cmd[5] = g_desired.nanoex ? (uint8_t)(keep | 0x40) : keep;
-    }
-    if (g_desired.mask & F_ECONAVI) {
-        cmd[5] = g_desired.econavi ? (uint8_t)(cmd[5] | 0x10) : (uint8_t)(cmd[5] & ~0x10);
-    }
-    if (g_desired.mask & F_ECO) {
-        cmd[8] = g_desired.eco ? 0x40 : 0x00;
-    }
-    if (g_desired.mask & F_MILD) {
-        cmd[2] = g_desired.mild ? 0x7F : 0x80;
-    }
-    if (g_desired.mask & F_POWER) {
-        if (g_desired.power) {
-            if ((cmd[0] & 0x0F) == 0) {
-                cmd[0] = (uint8_t)((cmd[0] & 0xF0) | 0x04);
-            }
-        } else {
-            cmd[0] &= 0xF0;
-        }
-    }
-    return true;
+    return changed && memcmp(cmd, g_shadow, 10) != 0;
 }
 
 static void protocol_task(void *)
@@ -609,7 +380,7 @@ static void protocol_task(void *)
         uint8_t tmp[64];
         // Short wait so a frame still arriving at 9600 baud is not cut in half.
         // A frame is complete only after RX_GAP_MS of silence, same as the ESPHome driver.
-        int n = uart_read_bytes(UART, tmp, sizeof(tmp), pdMS_TO_TICKS(10));
+        int n = uart_read_bytes(UART, tmp, sizeof(tmp), pdMS_TO_TICKS(RX_GAP_MS));
         int64_t now = now_ms();
         if (n > 0) {
             if (rx_len + (size_t)n > RX_MAX) {
@@ -621,7 +392,7 @@ static void protocol_task(void *)
             }
             last_rx = now;
         } else if (rx_len > 0 && now - last_rx >= RX_GAP_MS) {
-            if (handle_rx(rx, rx_len)) {
+            if (handle_rx(rx, rx_len, now)) {
                 last_good = now;
             }
             rx_len = 0;
@@ -641,13 +412,17 @@ static void protocol_task(void *)
         }
 
         bool sent = false;
-        if (g_desired.mask != 0 && g_shadow_valid && now - last_tx >= CMD_INTERVAL_MS) {
+        if (g_ops_n > 0 && g_shadow_valid && now - last_tx >= CMD_INTERVAL_MS) {
             uint8_t payload[10];
             if (build_control(payload)) {
                 send_frame(CTRL_HEADER, payload, sizeof(payload), true);
-                g_desired.mask = 0;
+                memcpy(g_shadow, payload, sizeof(payload));
+                g_cmd_ms = now;
+                g_ops_n = 0;
                 last_tx = now;
                 sent = true;
+            } else {
+                g_ops_n = 0;
             }
         }
         if (!sent && now - last_tx >= CMD_INTERVAL_MS &&
@@ -700,7 +475,7 @@ esp_err_t init(int tx_gpio, int rx_gpio, int8_t indoor_offset, int8_t outdoor_of
         uart_driver_delete(UART);
         return ESP_ERR_NO_MEM;
     }
-    if (xTaskCreate(protocol_task, "panasonic", 6144, nullptr, 8, nullptr) != pdPASS) {
+    if (xTaskCreate(protocol_task, "panasonic", 8192, nullptr, 8, nullptr) != pdPASS) {
         vQueueDelete(g_queue);
         g_queue = nullptr;
         uart_driver_delete(UART);

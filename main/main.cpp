@@ -1,3 +1,4 @@
+#include <limits>
 #include <math.h>
 #include <stdint.h>
 
@@ -58,6 +59,7 @@ static constexpr uint16_t ATTR_VSWING = 0xF00F;
 static constexpr uint16_t ATTR_HSWING = 0xF010;
 
 static bool g_zb_ready = false;
+static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool ac_power = false;
 static uint8_t ac_mode = 0;
 static uint8_t ac_last_mode = (uint8_t)panasonic::Mode::Cool;
@@ -71,10 +73,15 @@ static bool ac_eco = false;
 static bool ac_econavi = false;
 static bool ac_mild = false;
 static bool ac_defrost = false;
-static float ac_indoor = 0.0f;
-static float ac_outdoor = 0.0f;
+static bool ac_defrost_valid = false;
+static float ac_indoor = std::numeric_limits<float>::quiet_NaN();
+static float ac_outdoor = std::numeric_limits<float>::quiet_NaN();
 static float ac_target = 24.0f;
-static float ac_power_w = 0.0f;
+static bool ac_set_valid = false;
+static bool ac_indoor_valid = false;
+static bool ac_outdoor_valid = false;
+static float ac_power_w = std::numeric_limits<float>::quiet_NaN();
+static bool ac_power_valid = false;
 static int16_t thermostat_local_temp = (int16_t)0x8000;
 static int16_t thermostat_outdoor_temp = (int16_t)0x8000;
 static int16_t thermostat_cooling_setpoint = 2400;
@@ -148,55 +155,163 @@ static void update_attr(uint16_t cluster, uint16_t attr, void *value)
     esp_zb_zcl_set_attribute_val(ZIGBEE_ENDPOINT, cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, attr, value, false);
 }
 
-static void publish_all_attrs(bool take_lock)
+static bool near_temp(float a, float b)
+{
+    return fabsf(a - b) < 0.05f;
+}
+
+struct Published {
+    bool power;
+    uint8_t mode;
+    uint8_t fan;
+    uint8_t swing;
+    uint8_t preset;
+    uint8_t vswing;
+    uint8_t hswing;
+    bool nanoex;
+    bool eco;
+    bool econavi;
+    bool mild;
+    bool defrost;
+    bool defrost_valid;
+    bool set_valid;
+    bool indoor_valid;
+    bool outdoor_valid;
+    bool power_valid;
+    float target;
+    float indoor;
+    float outdoor;
+    float power_w;
+    int16_t local_temp;
+    int16_t outdoor_temp;
+};
+
+static Published g_published = {};
+static bool g_published_valid = false;
+
+static bool state_changed(const Published &now)
+{
+    if (!g_published_valid) {
+        return true;
+    }
+    const Published &prev = g_published;
+    if (prev.power != now.power || prev.mode != now.mode || prev.fan != now.fan || prev.swing != now.swing ||
+        prev.preset != now.preset || prev.vswing != now.vswing || prev.hswing != now.hswing ||
+        prev.nanoex != now.nanoex || prev.eco != now.eco || prev.econavi != now.econavi || prev.mild != now.mild ||
+        prev.defrost_valid != now.defrost_valid || (now.defrost_valid && prev.defrost != now.defrost) ||
+        prev.set_valid != now.set_valid || (now.set_valid && !near_temp(prev.target, now.target)) ||
+        prev.indoor_valid != now.indoor_valid || (now.indoor_valid && !near_temp(prev.indoor, now.indoor)) ||
+        prev.outdoor_valid != now.outdoor_valid || (now.outdoor_valid && !near_temp(prev.outdoor, now.outdoor)) ||
+        prev.power_valid != now.power_valid || (now.power_valid && !near_temp(prev.power_w, now.power_w))) {
+        return true;
+    }
+    return false;
+}
+
+static Published capture_state()
+{
+    Published now = {};
+    taskENTER_CRITICAL(&s_state_mux);
+    now.power = ac_power;
+    now.mode = ac_mode;
+    now.fan = ac_fan;
+    now.swing = ac_swing;
+    now.preset = ac_preset;
+    now.vswing = ac_vswing;
+    now.hswing = ac_hswing;
+    now.nanoex = ac_nanoex;
+    now.eco = ac_eco;
+    now.econavi = ac_econavi;
+    now.mild = ac_mild;
+    now.defrost = ac_defrost;
+    now.defrost_valid = ac_defrost_valid;
+    now.set_valid = ac_set_valid;
+    now.indoor_valid = ac_indoor_valid;
+    now.outdoor_valid = ac_outdoor_valid;
+    now.power_valid = ac_power_valid;
+    now.target = ac_target;
+    now.indoor = ac_indoor;
+    now.outdoor = ac_outdoor;
+    now.power_w = ac_power_w;
+    now.local_temp = thermostat_local_temp;
+    now.outdoor_temp = thermostat_outdoor_temp;
+    taskEXIT_CRITICAL(&s_state_mux);
+    return now;
+}
+
+static bool publish_all_attrs(bool take_lock)
 {
     if (!g_zb_ready) {
-        return;
+        return false;
+    }
+    Published now = capture_state();
+    taskENTER_CRITICAL(&s_state_mux);
+    bool changed = state_changed(now);
+    taskEXIT_CRITICAL(&s_state_mux);
+    if (!changed) {
+        return true;
     }
     if (take_lock && esp_zb_lock_acquire(pdMS_TO_TICKS(200)) != ESP_OK) {
         ESP_LOGW(TAG, "Zigbee lock busy, skip state publish");
-        return;
+        return false;
     }
 
-    thermostat_cooling_setpoint = celsius_to_zcl(ac_target);
-    thermostat_heating_setpoint = celsius_to_zcl(ac_target);
-    thermostat_system_mode = ac_mode_to_system_mode(ac_mode);
-    thermostat_running_mode = ac_power ? thermostat_system_mode : 0x00;
-    thermostat_louver_position = ac_swing == (uint8_t)panasonic::Swing::Off
+    thermostat_system_mode = ac_mode_to_system_mode(now.mode);
+    thermostat_running_mode = now.power ? thermostat_system_mode : 0x00;
+    thermostat_louver_position = now.swing == (uint8_t)panasonic::Swing::Off
                                      ? ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED
                                      : ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_OPEN;
+    if (now.set_valid) {
+        thermostat_cooling_setpoint = celsius_to_zcl(now.target);
+        thermostat_heating_setpoint = thermostat_cooling_setpoint;
+    }
 
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_LOCAL_TEMPERATURE_ID, &thermostat_local_temp);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OUTDOOR_TEMPERATURE_ID, &thermostat_outdoor_temp);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_COOLING_SETPOINT_ID,
-                &thermostat_cooling_setpoint);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_HEATING_SETPOINT_ID,
-                &thermostat_heating_setpoint);
+    if (now.indoor_valid) {
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_LOCAL_TEMPERATURE_ID, &now.local_temp);
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_INDOOR, &now.indoor);
+    }
+    if (now.outdoor_valid) {
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OUTDOOR_TEMPERATURE_ID, &now.outdoor_temp);
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_OUTDOOR, &now.outdoor);
+    }
+    if (now.set_valid) {
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_COOLING_SETPOINT_ID,
+                    &thermostat_cooling_setpoint);
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_HEATING_SETPOINT_ID,
+                    &thermostat_heating_setpoint);
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_TARGET, &now.target);
+    }
     update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_SYSTEM_MODE_ID, &thermostat_system_mode);
     update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_RUNNING_MODE_ID, &thermostat_running_mode);
     update_attr(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, ESP_ZB_ZCL_ATTR_THERMOSTAT_AC_LOUVER_POSITION_ID, &thermostat_louver_position);
 
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_POWER, &ac_power);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_MODE, &ac_mode);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_FAN, &ac_fan);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_SWING, &ac_swing);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_PRESET, &ac_preset);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_NANOEX, &ac_nanoex);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_INDOOR, &ac_indoor);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_OUTDOOR, &ac_outdoor);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_TARGET, &ac_target);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_POWER, &now.power);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_MODE, &now.mode);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_FAN, &now.fan);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_SWING, &now.swing);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_PRESET, &now.preset);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_NANOEX, &now.nanoex);
     update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_FW, &firmware_version);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_ECO, &ac_eco);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_ECONAVI, &ac_econavi);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_MILD, &ac_mild);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_DEFROST, &ac_defrost);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_POWER_W, &ac_power_w);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_VSWING, &ac_vswing);
-    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_HSWING, &ac_hswing);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_ECO, &now.eco);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_ECONAVI, &now.econavi);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_MILD, &now.mild);
+    if (now.defrost_valid) {
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_DEFROST, &now.defrost);
+    }
+    if (now.power_valid) {
+        update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_POWER_W, &now.power_w);
+    }
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_VSWING, &now.vswing);
+    update_attr(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ATTR_HSWING, &now.hswing);
 
     if (take_lock) {
         esp_zb_lock_release();
     }
+    taskENTER_CRITICAL(&s_state_mux);
+    g_published = now;
+    g_published_valid = true;
+    taskEXIT_CRITICAL(&s_state_mux);
+    return true;
 }
 
 static void on_panasonic_state(const panasonic::State &state)
@@ -205,6 +320,7 @@ static void on_panasonic_state(const panasonic::State &state)
         return;
     }
 
+    taskENTER_CRITICAL(&s_state_mux);
     ac_power = state.power_on;
     ac_mode = (uint8_t)state.mode;
     if (state.mode != panasonic::Mode::Off) {
@@ -219,21 +335,29 @@ static void on_panasonic_state(const panasonic::State &state)
     ac_eco = state.eco;
     ac_econavi = state.econavi;
     ac_mild = state.mild_dry;
-    ac_target = state.set_temp;
+    if (state.set_valid) {
+        ac_target = state.set_temp;
+        ac_set_valid = true;
+    }
     if (state.indoor_valid) {
         ac_indoor = state.indoor_temp;
+        ac_indoor_valid = true;
         thermostat_local_temp = celsius_to_zcl(ac_indoor);
     }
     if (state.outdoor_valid) {
         ac_outdoor = state.outdoor_temp;
+        ac_outdoor_valid = true;
         thermostat_outdoor_temp = celsius_to_zcl(ac_outdoor);
     }
     if (state.defrost_valid) {
         ac_defrost = state.defrost;
+        ac_defrost_valid = true;
     }
     if (state.power_valid) {
         ac_power_w = state.power_w;
+        ac_power_valid = true;
     }
+    taskEXIT_CRITICAL(&s_state_mux);
     publish_all_attrs(true);
 }
 
@@ -267,12 +391,14 @@ static void remember_on_mode()
 
 static void apply_power(bool on)
 {
+    taskENTER_CRITICAL(&s_state_mux);
     ac_power = on;
     if (on) {
         remember_on_mode();
     } else {
         ac_mode = (uint8_t)panasonic::Mode::Off;
     }
+    taskEXIT_CRITICAL(&s_state_mux);
     panasonic::set_power(on);
 }
 
@@ -281,19 +407,25 @@ static void apply_mode(uint8_t mode)
     if (mode > (uint8_t)panasonic::Mode::Fan) {
         return;
     }
+    taskENTER_CRITICAL(&s_state_mux);
     ac_mode = mode;
     ac_power = mode != (uint8_t)panasonic::Mode::Off;
     if (ac_power) {
         ac_last_mode = mode;
     }
+    taskEXIT_CRITICAL(&s_state_mux);
     panasonic::set_mode((panasonic::Mode)mode);
 }
 
 static void apply_target(float celsius)
 {
-    ac_target = normalize_target_temp(celsius);
+    float normalized = normalize_target_temp(celsius);
+    taskENTER_CRITICAL(&s_state_mux);
+    ac_target = normalized;
+    ac_set_valid = true;
     remember_on_mode();
-    panasonic::set_target_temp(ac_target);
+    taskEXIT_CRITICAL(&s_state_mux);
+    panasonic::set_target_temp(normalized);
     panasonic::set_power(true);
 }
 
@@ -314,12 +446,16 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
         case ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_HEATING_SETPOINT_ID:
             apply_target((float)attr_i16(message) / 100.0f);
             break;
-        case ESP_ZB_ZCL_ATTR_THERMOSTAT_AC_LOUVER_POSITION_ID:
-            ac_swing = attr_u8(message) == ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED
-                           ? (uint8_t)panasonic::Swing::Off
-                           : (uint8_t)panasonic::Swing::Vertical;
-            panasonic::set_swing((panasonic::Swing)ac_swing);
+        case ESP_ZB_ZCL_ATTR_THERMOSTAT_AC_LOUVER_POSITION_ID: {
+            uint8_t swing = attr_u8(message) == ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED
+                                ? (uint8_t)panasonic::Swing::Off
+                                : (uint8_t)panasonic::Swing::Vertical;
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_swing = swing;
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_swing((panasonic::Swing)swing);
             break;
+        }
         default:
             break;
         }
@@ -340,53 +476,83 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
         break;
     case ATTR_FAN:
         if (attr_u8(message) <= (uint8_t)panasonic::Fan::S5) {
-            ac_fan = attr_u8(message);
-            // Powerful / Quiet occupies the same byte as fan and is cleared with a fan change.
+            uint8_t fan = attr_u8(message);
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_fan = fan;
             ac_preset = (uint8_t)panasonic::Preset::None;
-            panasonic::set_fan((panasonic::Fan)ac_fan);
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_fan((panasonic::Fan)fan);
         }
         break;
     case ATTR_SWING:
         if (attr_u8(message) <= (uint8_t)panasonic::Swing::Both) {
-            ac_swing = attr_u8(message);
-            panasonic::set_swing((panasonic::Swing)ac_swing);
+            uint8_t swing = attr_u8(message);
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_swing = swing;
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_swing((panasonic::Swing)swing);
         }
         break;
     case ATTR_PRESET:
         if (attr_u8(message) <= (uint8_t)panasonic::Preset::Quiet) {
-            ac_preset = attr_u8(message);
-            panasonic::set_preset((panasonic::Preset)ac_preset);
+            uint8_t preset = attr_u8(message);
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_preset = preset;
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_preset((panasonic::Preset)preset);
         }
         break;
-    case ATTR_NANOEX:
-        ac_nanoex = attr_bool(message);
-        panasonic::set_nanoex(ac_nanoex);
+    case ATTR_NANOEX: {
+        bool nanoex = attr_bool(message);
+        taskENTER_CRITICAL(&s_state_mux);
+        ac_nanoex = nanoex;
+        taskEXIT_CRITICAL(&s_state_mux);
+        panasonic::set_nanoex(nanoex);
         break;
-    case ATTR_ECO:
-        ac_eco = attr_bool(message);
-        panasonic::set_eco(ac_eco);
+    }
+    case ATTR_ECO: {
+        bool eco = attr_bool(message);
+        taskENTER_CRITICAL(&s_state_mux);
+        ac_eco = eco;
+        taskEXIT_CRITICAL(&s_state_mux);
+        panasonic::set_eco(eco);
         break;
-    case ATTR_ECONAVI:
-        ac_econavi = attr_bool(message);
-        panasonic::set_econavi(ac_econavi);
+    }
+    case ATTR_ECONAVI: {
+        bool econavi = attr_bool(message);
+        taskENTER_CRITICAL(&s_state_mux);
+        ac_econavi = econavi;
+        taskEXIT_CRITICAL(&s_state_mux);
+        panasonic::set_econavi(econavi);
         break;
-    case ATTR_MILD:
-        ac_mild = attr_bool(message);
-        panasonic::set_mild_dry(ac_mild);
+    }
+    case ATTR_MILD: {
+        bool mild = attr_bool(message);
+        taskENTER_CRITICAL(&s_state_mux);
+        ac_mild = mild;
+        taskEXIT_CRITICAL(&s_state_mux);
+        panasonic::set_mild_dry(mild);
         break;
+    }
     case ATTR_TARGET:
         apply_target(attr_single(message));
         break;
     case ATTR_VSWING:
         if (attr_u8(message) <= (uint8_t)panasonic::VSwing::Auto) {
-            ac_vswing = attr_u8(message);
-            panasonic::set_vswing((panasonic::VSwing)ac_vswing);
+            uint8_t vswing = attr_u8(message);
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_vswing = vswing;
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_vswing((panasonic::VSwing)vswing);
         }
         break;
     case ATTR_HSWING:
         if (attr_u8(message) <= (uint8_t)panasonic::HSwing::Auto) {
-            ac_hswing = attr_u8(message);
-            panasonic::set_hswing((panasonic::HSwing)ac_hswing);
+            uint8_t hswing = attr_u8(message);
+            taskENTER_CRITICAL(&s_state_mux);
+            ac_hswing = hswing;
+            taskEXIT_CRITICAL(&s_state_mux);
+            panasonic::set_hswing((panasonic::HSwing)hswing);
         }
         break;
     default:
@@ -427,6 +593,15 @@ static esp_err_t ota_extract_element(uint32_t total_size, const void *payload, u
     return ESP_OK;
 }
 
+static void ota_abort()
+{
+    if (s_ota_handle != 0) {
+        esp_ota_abort(s_ota_handle);
+        s_ota_handle = 0;
+    }
+    s_ota_tagid_received = false;
+}
+
 static esp_err_t zb_ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message_t message)
 {
     static uint32_t total_size = 0;
@@ -450,15 +625,23 @@ static esp_err_t zb_ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_mess
             void *out_buf = nullptr;
             esp_err_t ret = ota_extract_element(total_size, message.payload, message.payload_size, &out_buf, &out_len);
             if (ret != ESP_OK) {
+                ota_abort();
                 return ret;
             }
             if (out_len) {
-                return esp_ota_write(s_ota_handle, out_buf, out_len);
+                ret = esp_ota_write(s_ota_handle, out_buf, out_len);
+                if (ret != ESP_OK) {
+                    ota_abort();
+                    return ret;
+                }
             }
         }
         break;
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_CHECK:
         if (offset != total_size) {
+            ota_abort();
+            offset = 0;
+            total_size = 0;
             return ESP_FAIL;
         }
         offset = 0;
@@ -496,6 +679,11 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
     return ESP_OK;
 }
 
+extern "C" void factory_reset_cb(uint8_t)
+{
+    esp_zb_factory_reset();
+}
+
 static void factory_reset_button_task(void *)
 {
     gpio_config_t io = {};
@@ -515,9 +703,12 @@ static void factory_reset_button_task(void *)
             if (pressed_since == 0) {
                 pressed_since = now;
             } else if (!reset_done && g_zb_ready && now - pressed_since >= FACTORY_RESET_HOLD_MS) {
-                reset_done = true;
-                ESP_LOGW(TAG, "Factory reset: leaving the Zigbee network");
-                esp_zb_factory_reset();
+                if (esp_zb_lock_acquire(pdMS_TO_TICKS(200)) == ESP_OK) {
+                    esp_zb_scheduler_alarm(factory_reset_cb, 0, 0);
+                    esp_zb_lock_release();
+                    reset_done = true;
+                    ESP_LOGW(TAG, "Factory reset: leaving the Zigbee network");
+                }
             }
         } else {
             pressed_since = 0;
@@ -532,6 +723,48 @@ static void add_analog(esp_zb_attribute_list_t *list, uint16_t id, uint8_t type,
     ESP_ERROR_CHECK(esp_zb_cluster_add_attr(list, ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, id, type, access, value));
 }
 
+static void config_report(uint16_t cluster, uint16_t attr)
+{
+    esp_zb_zcl_reporting_info_t info = {};
+    info.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV;
+    info.ep = ZIGBEE_ENDPOINT;
+    info.cluster_id = cluster;
+    info.cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE;
+    info.attr_id = attr;
+    info.manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC;
+    info.u.send_info.min_interval = 1;
+    info.u.send_info.max_interval = 300;
+    info.u.send_info.def_min_interval = 1;
+    info.u.send_info.def_max_interval = 300;
+    info.u.send_info.delta.u8 = 0;
+    esp_err_t err = esp_zb_zcl_update_reporting_info(&info);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "reporting 0x%04x/0x%04x failed: %s", cluster, attr, esp_err_to_name(err));
+    }
+}
+
+static void config_reports()
+{
+    const uint16_t therm[] = {
+        ESP_ZB_ZCL_ATTR_THERMOSTAT_LOCAL_TEMPERATURE_ID,
+        ESP_ZB_ZCL_ATTR_THERMOSTAT_OUTDOOR_TEMPERATURE_ID,
+        ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_COOLING_SETPOINT_ID,
+        ESP_ZB_ZCL_ATTR_THERMOSTAT_OCCUPIED_HEATING_SETPOINT_ID,
+        ESP_ZB_ZCL_ATTR_THERMOSTAT_SYSTEM_MODE_ID,
+    };
+    for (uint16_t id : therm) {
+        config_report(ESP_ZB_ZCL_CLUSTER_ID_THERMOSTAT, id);
+    }
+    const uint16_t analog[] = {
+        ATTR_POWER, ATTR_MODE,     ATTR_FAN,    ATTR_SWING, ATTR_PRESET, ATTR_NANOEX, ATTR_INDOOR,
+        ATTR_OUTDOOR, ATTR_TARGET, ATTR_FW,     ATTR_ECO,   ATTR_ECONAVI, ATTR_MILD, ATTR_DEFROST,
+        ATTR_POWER_W, ATTR_VSWING, ATTR_HSWING,
+    };
+    for (uint16_t id : analog) {
+        config_report(ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, id);
+    }
+}
+
 extern "C" void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -542,7 +775,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ret);
     xTaskCreate(factory_reset_button_task, "factory_reset", 2048, nullptr, 5, nullptr);
 
-    ESP_LOGI(TAG, "Panasonic CZ-TACG1 Zigbee bridge 1.0.0");
+    ESP_LOGI(TAG, "ESP-PAC CZ-TACG1 Zigbee bridge 1.0.0");
 
     esp_zb_platform_config_t platform_config = {};
     platform_config.radio_config.radio_mode = ZB_RADIO_MODE_NATIVE;
@@ -556,7 +789,7 @@ extern "C" void app_main(void)
     esp_zb_init(&zb_cfg);
 
     static char model_id[] = {15, 'Z', 'B', '-', 'P', 'A', 'N', 'A', 'S', 'O', 'N', 'I', 'C', '-', 'A', 'C'};
-    static char manuf_name[] = {9, 'P', 'a', 'n', 'a', 's', 'o', 'n', 'i', 'c'};
+    static char manuf_name[] = {7, 'E', 'S', 'P', '-', 'P', 'A', 'C'};
 
     esp_zb_basic_cluster_cfg_t basic_cfg = {};
     basic_cfg.zcl_version = 3;
@@ -645,7 +878,7 @@ extern "C" void app_main(void)
     esp_zb_core_action_handler_register(zb_action_handler);
 
     g_zb_ready = true;
-    publish_all_attrs(true);
+    config_reports();
     ESP_ERROR_CHECK(esp_zb_start(false));
     ESP_ERROR_CHECK(panasonic::init(CONFIG_PANASONIC_UART_TX_GPIO, CONFIG_PANASONIC_UART_RX_GPIO,
                                     (int8_t)CONFIG_PANASONIC_INDOOR_OFFSET, (int8_t)CONFIG_PANASONIC_OUTDOOR_OFFSET,
@@ -659,8 +892,28 @@ extern "C" void bdb_start_top_level_commissioning_cb(uint8_t mode_mask)
     esp_zb_bdb_start_top_level_commissioning(mode_mask);
 }
 
+static uint8_t s_steer_step = 0;
+
+static uint32_t steer_delay_ms()
+{
+    static const uint32_t delays[] = {1000, 2000, 5000, 10000};
+    uint32_t delay = delays[s_steer_step];
+    if (s_steer_step + 1 < 4) {
+        s_steer_step++;
+    }
+    return delay;
+}
+
+static void schedule_steering()
+{
+    uint32_t delay = steer_delay_ms();
+    ESP_LOGW(TAG, "Steering retry in %lu ms", (unsigned long)delay);
+    esp_zb_scheduler_alarm(bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, delay);
+}
+
 static void joined_network()
 {
+    s_steer_step = 0;
     ESP_LOGI(TAG, "On Zigbee network, pan 0x%04x channel %d addr 0x%04x", esp_zb_get_pan_id(),
              esp_zb_get_current_channel(), esp_zb_get_short_address());
     panasonic::request_status();
@@ -710,8 +963,8 @@ extern "C" void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
                 ota_find_server();
             }
         } else {
-            ESP_LOGW(TAG, "Zigbee init failed (%s), retry steering", esp_err_to_name(err_status));
-            esp_zb_scheduler_alarm(bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
+            ESP_LOGW(TAG, "Zigbee init failed (%s)", esp_err_to_name(err_status));
+            schedule_steering();
         }
         break;
     case ESP_ZB_BDB_SIGNAL_STEERING:
@@ -719,8 +972,8 @@ extern "C" void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
             joined_network();
             ota_find_server();
         } else {
-            ESP_LOGW(TAG, "Steering failed (%s), retry in 1s. Permit join on the coordinator.", esp_err_to_name(err_status));
-            esp_zb_scheduler_alarm(bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
+            ESP_LOGW(TAG, "Steering failed (%s). Permit join on the coordinator.", esp_err_to_name(err_status));
+            schedule_steering();
         }
         break;
     default:

@@ -32,6 +32,8 @@ CN-CNT is a 5 V UART. The ESP32 is 3.3 V, so both TX and RX go through a bidirec
 | TX (data to the ESP) | HV2 ↔ LV2 | GPIO8 (RX, changeable in menuconfig) |
 | — | LV VCC | 3.3 V |
 
+On ESP32-C6, GPIO8 is a ROM-log strap. Idle-high UART leaves the ROM log enabled. A level shifter that holds GPIO8 low while the chip resets silences that log. GPIO9 is the BOOT strap and the factory-reset button; the shifter must not drive it.
+
 Directions are from the ESP: ESP TX goes to the AC RX. The firmware uses **9600 8E1** (even parity), the same setting as the original CZ-TACG1 module.
 
 GPIO9 is the BOOT button on most development boards and is used for factory reset.
@@ -62,8 +64,8 @@ external_converters:
 ```
 
 3. Restart Zigbee2MQTT and enable Permit join.
-4. After power-up the module joins as a router. The identity is `Panasonic` / `ZB-PANASONIC-AC`.
-5. If it was joined to another network, hold BOOT (GPIO9) for 5 seconds. That clears the Zigbee data and starts steering again.
+4. After power-up the module joins as a router. The identity is `ESP-PAC` / `ZB-PANASONIC-AC`. A device paired with the earlier `Panasonic` manufacturer name has to leave the network and join again.
+5. If it was joined to another network, hold BOOT (GPIO9) for 5 seconds. That clears the Zigbee data and starts steering again. If permit-join is closed, steering retries after 1 s, 2 s, 5 s, then every 10 s.
 
 Home Assistant shows a thermostat. Fan speed, swing, Powerful / Quiet, nanoeX, and the other controls appear as additional entities on the same device.
 
@@ -75,7 +77,7 @@ Changing the fan speed clears Powerful / Quiet. The ESPHome component does the s
 
 ## CI
 
-`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on every pull request and every push to `main`. The binaries stay in the Actions artifact for 14 days.
+`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on every pull request and every push to `main`, and compiles the host codec test. The binaries stay in the Actions artifact for 14 days.
 
 A `v*` tag attaches the same images to a GitHub Release. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
 

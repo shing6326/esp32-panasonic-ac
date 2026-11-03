@@ -60,8 +60,32 @@ const zclSystemModeToMode = {
     8: 'dry',
 };
 
+const unwrap = (v) => (v && typeof v === 'object' && 'value' in v ? v.value : v);
+
+const num = (v) => {
+    if (v === undefined) return undefined;
+    const n = Number(unwrap(v));
+    return Number.isFinite(n) ? n : undefined;
+};
+
+const onOff = (v) => {
+    if (v === undefined) return undefined;
+    const raw = unwrap(v);
+    if (raw === undefined) return undefined;
+    return raw ? 'ON' : 'OFF';
+};
+
+const zclTemp = (v) => {
+    if (v === undefined) return undefined;
+    const raw = unwrap(v);
+    if (raw === 0x8000 || raw === -32768) return undefined;
+    const t = Number(raw) / 100;
+    return Number.isFinite(t) ? t : undefined;
+};
+
 const formatFirmware = (value) => {
-    const version = Number(value) >>> 0;
+    const version = Number(unwrap(value)) >>> 0;
+    if (!Number.isFinite(Number(unwrap(value)))) return undefined;
     return `${(version >>> 24) & 0xff}.${(version >>> 16) & 0xff}.${(version >>> 8) & 0xff}`;
 };
 
@@ -80,26 +104,44 @@ const fromZigbeeAcAnalog = {
         const data = msg.data;
         const result = {};
 
-        if (data[ATTR.power] !== undefined) result.state = data[ATTR.power] ? 'ON' : 'OFF';
-        if (data[ATTR.mode] !== undefined) result.system_mode = ID_TO_MODE[data[ATTR.mode]] ?? 'auto';
-        if (data[ATTR.fanMode] !== undefined) result.fan_mode = ID_TO_FAN[data[ATTR.fanMode]] ?? 'auto';
-        if (data[ATTR.swingMode] !== undefined) result.swing_mode = ID_TO_SWING[data[ATTR.swingMode]] ?? 'off';
-        if (data[ATTR.preset] !== undefined) result.preset = ID_TO_PRESET[data[ATTR.preset]] ?? 'none';
-        if (data[ATTR.nanoex] !== undefined) result.nanoex = data[ATTR.nanoex] ? 'ON' : 'OFF';
-        if (data[ATTR.eco] !== undefined) result.eco = data[ATTR.eco] ? 'ON' : 'OFF';
-        if (data[ATTR.econavi] !== undefined) result.econavi = data[ATTR.econavi] ? 'ON' : 'OFF';
-        if (data[ATTR.mildDry] !== undefined) result.mild_dry = data[ATTR.mildDry] ? 'ON' : 'OFF';
-        if (data[ATTR.defrost] !== undefined) result.defrost = data[ATTR.defrost] ? 'ON' : 'OFF';
-        if (data[ATTR.indoorTemp] !== undefined) result.local_temperature = data[ATTR.indoorTemp];
-        if (data[ATTR.outdoorTemp] !== undefined) result.outdoor_temperature = data[ATTR.outdoorTemp];
-        if (data[ATTR.targetTemp] !== undefined) {
-            result.occupied_heating_setpoint = data[ATTR.targetTemp];
-            result.occupied_cooling_setpoint = data[ATTR.targetTemp];
+        const power = onOff(data[ATTR.power]);
+        const mode = num(data[ATTR.mode]);
+        const fan = num(data[ATTR.fanMode]);
+        const swing = num(data[ATTR.swingMode]);
+        const preset = num(data[ATTR.preset]);
+        const nanoex = onOff(data[ATTR.nanoex]);
+        const eco = onOff(data[ATTR.eco]);
+        const econavi = onOff(data[ATTR.econavi]);
+        const mild = onOff(data[ATTR.mildDry]);
+        const defrost = onOff(data[ATTR.defrost]);
+        const indoor = num(data[ATTR.indoorTemp]);
+        const outdoor = num(data[ATTR.outdoorTemp]);
+        const target = num(data[ATTR.targetTemp]);
+        const watts = num(data[ATTR.powerW]);
+        const vswing = num(data[ATTR.vswing]);
+        const hswing = num(data[ATTR.hswing]);
+        const firmware = formatFirmware(data[ATTR.firmwareVersion]);
+
+        if (power !== undefined) result.state = power;
+        if (mode !== undefined) result.system_mode = ID_TO_MODE[mode] ?? 'auto';
+        if (fan !== undefined) result.fan_mode = ID_TO_FAN[fan] ?? 'auto';
+        if (swing !== undefined) result.swing_mode = ID_TO_SWING[swing] ?? 'off';
+        if (preset !== undefined) result.preset = ID_TO_PRESET[preset] ?? 'none';
+        if (nanoex !== undefined) result.nanoex = nanoex;
+        if (eco !== undefined) result.eco = eco;
+        if (econavi !== undefined) result.econavi = econavi;
+        if (mild !== undefined) result.mild_dry = mild;
+        if (defrost !== undefined) result.defrost = defrost;
+        if (indoor !== undefined) result.local_temperature = indoor;
+        if (outdoor !== undefined) result.outdoor_temperature = outdoor;
+        if (target !== undefined) {
+            result.occupied_heating_setpoint = target;
+            result.occupied_cooling_setpoint = target;
         }
-        if (data[ATTR.powerW] !== undefined) result.power_consumption = data[ATTR.powerW];
-        if (data[ATTR.vswing] !== undefined) result.vertical_swing = ID_TO_VSWING[data[ATTR.vswing]] ?? 'unknown';
-        if (data[ATTR.hswing] !== undefined) result.horizontal_swing = ID_TO_HSWING[data[ATTR.hswing]] ?? 'unknown';
-        if (data[ATTR.firmwareVersion] !== undefined) result.firmware_version = formatFirmware(data[ATTR.firmwareVersion]);
+        if (watts !== undefined) result.power_consumption = watts;
+        if (vswing !== undefined) result.vertical_swing = ID_TO_VSWING[vswing] ?? 'unknown';
+        if (hswing !== undefined) result.horizontal_swing = ID_TO_HSWING[hswing] ?? 'unknown';
+        if (firmware !== undefined) result.firmware_version = firmware;
 
         return result;
     },
@@ -110,15 +152,20 @@ const fromZigbeeThermostat = {
     type: ['attributeReport', 'readResponse'],
     convert: (model, msg) => {
         const result = {};
-        if (msg.data.localTemp !== undefined) result.local_temperature = msg.data.localTemp / 100;
-        if (msg.data.outdoorTemp !== undefined) result.outdoor_temperature = msg.data.outdoorTemp / 100;
-        if (msg.data.occupiedCoolingSetpoint !== undefined) {
-            result.occupied_heating_setpoint = msg.data.occupiedCoolingSetpoint / 100;
+        const local = zclTemp(msg.data.localTemp);
+        const outdoor = zclTemp(msg.data.outdoorTemp);
+        const cool = zclTemp(msg.data.occupiedCoolingSetpoint);
+        const heat = zclTemp(msg.data.occupiedHeatingSetpoint);
+        if (local !== undefined) result.local_temperature = local;
+        if (outdoor !== undefined) result.outdoor_temperature = outdoor;
+        if (cool !== undefined) result.occupied_cooling_setpoint = cool;
+        if (heat !== undefined) result.occupied_heating_setpoint = heat;
+        const systemMode = num(msg.data.systemMode);
+        if (systemMode !== undefined) {
+            const mode = zclSystemModeToMode[systemMode] ?? 'auto';
+            result.system_mode = mode;
+            result.state = mode === 'off' ? 'OFF' : 'ON';
         }
-        if (msg.data.occupiedHeatingSetpoint !== undefined) {
-            result.occupied_heating_setpoint = msg.data.occupiedHeatingSetpoint / 100;
-        }
-        if (msg.data.systemMode !== undefined) result.system_mode = zclSystemModeToMode[msg.data.systemMode] ?? 'auto';
         return result;
     },
 };
@@ -153,7 +200,16 @@ const toZigbee = {
             return {state: {state: on ? 'ON' : 'OFF'}};
         },
     },
-    system_mode: enumSet('system_mode', MODE_TO_ID, ATTR.mode),
+    system_mode: {
+        key: ['system_mode'],
+        convertSet: async (entity, _key, value) => {
+            const name = String(value);
+            if (!(name in MODE_TO_ID)) throw new Error(`Unsupported system_mode ${name}`);
+            await writeAttr(entity, 'genAnalogInput', ATTR.mode, MODE_TO_ID[name], DATA_TYPE.uint8);
+            return {state: {system_mode: name, state: name === 'off' ? 'OFF' : 'ON'}};
+        },
+        convertGet: async (entity) => readAttrs(entity, 'genAnalogInput', [ATTR.mode]),
+    },
     occupied_cooling_setpoint: {
         key: ['occupied_cooling_setpoint', 'occupied_heating_setpoint', 'current_heating_setpoint', 'current_cooling_setpoint'],
         convertSet: async (entity, _key, value) => {
@@ -176,9 +232,9 @@ const toZigbee = {
 };
 
 module.exports = {
-    fingerprint: [{modelID: 'ZB-PANASONIC-AC', manufacturerName: 'Panasonic'}],
+    fingerprint: [{modelID: 'ZB-PANASONIC-AC', manufacturerName: 'ESP-PAC'}],
     model: 'ZB-PANASONIC-AC',
-    vendor: 'Panasonic',
+    vendor: 'ESP-PAC',
     description: 'Panasonic CZ-TACG1 (CN-CNT) air conditioner bridged by ESP32-C6/H2 Zigbee',
     fromZigbee: [fromZigbeeAcAnalog, fromZigbeeThermostat],
     toZigbee: [
@@ -217,8 +273,16 @@ module.exports = {
     configure: async (device, coordinatorEndpoint) => {
         const endpoint = device.getEndpoint(1);
         await endpoint.bind('genAnalogInput', coordinatorEndpoint);
+        await readAttrs(endpoint, 'genAnalogInput', Object.values(ATTR));
         try {
             await endpoint.bind('hvacThermostat', coordinatorEndpoint);
+            await endpoint.read('hvacThermostat', [
+                'localTemp',
+                'outdoorTemp',
+                'occupiedCoolingSetpoint',
+                'occupiedHeatingSetpoint',
+                'systemMode',
+            ]);
         } catch (error) {
             // Some coordinators reject the thermostat binding. Analog reports still carry the state.
         }

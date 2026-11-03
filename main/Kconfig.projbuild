@@ -14,6 +14,9 @@ config PANASONIC_UART_RX_GPIO
     range 0 30
     help
         GPIO that receives the air conditioner TX line through the level shifter.
+        On ESP32-C6, GPIO8 is a ROM-log strap. An idle-high UART is fine.
+        A level shifter that pulls this pin low at reset silences the ROM log.
+        GPIO9 is the BOOT strap; the shifter must not drive it.
 
 config PANASONIC_FACTORY_RESET_GPIO
     int "Factory reset button GPIO (active low)"
