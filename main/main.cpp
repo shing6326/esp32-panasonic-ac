@@ -92,7 +92,7 @@ static uint8_t thermostat_system_mode = ESP_ZB_ZCL_THERMOSTAT_SYSTEM_MODE_OFF;
 static uint8_t thermostat_running_mode = 0x00;
 static uint8_t thermostat_ac_type = 0x04;
 static uint8_t thermostat_louver_position = ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED;
-static uint32_t firmware_version = 0x01000300;  // 1.0.3
+static uint32_t firmware_version = 0x01000400;  // 1.0.4
 
 static int16_t celsius_to_zcl(float celsius)
 {
@@ -724,6 +724,19 @@ static void add_analog(esp_zb_attribute_list_t *list, uint16_t id, uint8_t type,
     ESP_ERROR_CHECK(esp_zb_cluster_add_attr(list, ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, id, type, access, value));
 }
 
+// esp_zb_thermostat_cluster_create() marks the setpoints and system mode
+// read/write but not reportable. Zigbee2MQTT's generated thermostat definition
+// configures reporting and treats UNREPORTABLE_ATTRIBUTE as a failed configure.
+static void allow_reporting(esp_zb_attribute_list_t *list)
+{
+    for (esp_zb_attribute_list_t *node = list; node != nullptr; node = node->next) {
+        if (node->attribute.access == 0) {
+            continue;
+        }
+        node->attribute.access |= ESP_ZB_ZCL_ATTR_ACCESS_REPORTING;
+    }
+}
+
 static void config_report(uint16_t cluster, uint16_t attr)
 {
     esp_zb_zcl_reporting_info_t info = {};
@@ -821,6 +834,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(esp_zb_thermostat_cluster_add_attr(therm_attr, ESP_ZB_ZCL_ATTR_THERMOSTAT_AC_TYPE_ID, &thermostat_ac_type));
     ESP_ERROR_CHECK(esp_zb_thermostat_cluster_add_attr(therm_attr, ESP_ZB_ZCL_ATTR_THERMOSTAT_AC_LOUVER_POSITION_ID,
                                                        &thermostat_louver_position));
+    allow_reporting(therm_attr);
 
     esp_zb_analog_input_cluster_cfg_t analog_cfg = {};
     analog_cfg.out_of_service = false;
