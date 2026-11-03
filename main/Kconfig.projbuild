@@ -2,7 +2,7 @@ menu "Panasonic CZ-TACG1"
 
 config PANASONIC_UART_TX_GPIO
     int "UART TX GPIO (ESP TX -> AC RX)"
-    default 5
+    default 22
     range 0 30
     help
         GPIO that drives the air conditioner RX line through a 3.3 V to 5 V
@@ -10,13 +10,12 @@ config PANASONIC_UART_TX_GPIO
 
 config PANASONIC_UART_RX_GPIO
     int "UART RX GPIO (ESP RX <- AC TX)"
-    default 8
+    default 23
     range 0 30
     help
         GPIO that receives the air conditioner TX line through the level shifter.
-        On ESP32-C6, GPIO8 is a ROM-log strap. An idle-high UART is fine.
-        A level shifter that pulls this pin low at reset silences the ROM log.
-        GPIO9 is the BOOT strap; the shifter must not drive it.
+        GPIO8 is a ROM-log strap and GPIO9 is the BOOT strap. Keep the level
+        shifter off both pins.
 
 config PANASONIC_FACTORY_RESET_GPIO
     int "Factory reset button GPIO (active low)"
