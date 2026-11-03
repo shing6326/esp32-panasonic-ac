@@ -235,7 +235,7 @@ module.exports = {
     fingerprint: [{modelID: 'ZB-PANASONIC-AC', manufacturerName: 'ESP-PAC'}],
     model: 'ZB-PANASONIC-AC',
     vendor: 'ESP-PAC',
-    description: 'Panasonic CZ-TACG1 (CN-CNT) air conditioner bridged by ESP32-C6/H2 Zigbee',
+    description: 'Panasonic CZ-TACG1 (CN-CNT) air conditioner bridged by ESP32-C6 Zigbee',
     fromZigbee: [fromZigbeeAcAnalog, fromZigbeeThermostat],
     toZigbee: [
         toZigbee.state,

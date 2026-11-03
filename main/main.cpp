@@ -28,13 +28,10 @@ static constexpr uint8_t ZIGBEE_ENDPOINT = 1;
 static constexpr int64_t FACTORY_RESET_HOLD_MS = 5000;
 
 static constexpr uint16_t OTA_MANUFACTURER = 0x5041;
-#if CONFIG_IDF_TARGET_ESP32H2
-static constexpr uint16_t OTA_IMAGE_TYPE = 0x0002;
-#elif CONFIG_IDF_TARGET_ESP32C6
-static constexpr uint16_t OTA_IMAGE_TYPE = 0x0001;
-#else
-#error "Set the target to esp32c6 or esp32h2"
+#ifndef CONFIG_IDF_TARGET_ESP32C6
+#error "Set the target to esp32c6"
 #endif
+static constexpr uint16_t OTA_IMAGE_TYPE = 0x0001;
 static constexpr uint16_t OTA_HW_VERSION = 0x0100;
 static constexpr uint8_t OTA_MAX_DATA_SIZE = 223;
 static constexpr int OTA_ELEMENT_HEADER_LEN = 6;

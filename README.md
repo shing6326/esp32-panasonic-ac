@@ -1,6 +1,6 @@
 # ESP32 Zigbee Panasonic AC (CZ-TACG1)
 
-Replace the Panasonic **CZ-TACG1** Wi-Fi module with an ESP32-C6 or ESP32-H2. The board connects to the indoor unit **CN-CNT** UART, joins the network as a Zigbee router, and is controlled through Zigbee2MQTT / Home Assistant.
+Replace the Panasonic **CZ-TACG1** Wi-Fi module with an ESP32-C6. The board connects to the indoor unit **CN-CNT** UART, joins the network as a Zigbee router, and is controlled through Zigbee2MQTT / Home Assistant.
 
 Supported protocol: CZ-TACG1 / CN-CNT. DNSK-P11 / CN-WLAN is out of scope.
 
@@ -24,7 +24,7 @@ Disconnect mains power before opening the indoor unit. The control board is live
 
 CN-CNT is a 5 V UART. The ESP32 is 3.3 V, so both TX and RX go through a bidirectional level shifter. Keep the ESP pins off the AC connector.
 
-| AC CN-CNT | Level shifter | ESP32-C6 / H2 |
+| AC CN-CNT | Level shifter | ESP32-C6 |
 | --- | --- | --- |
 | 5 V | HV | 5 V / VIN |
 | GND | GND (common ground on both sides) | GND |
@@ -45,7 +45,7 @@ Use ESP-IDF 5.5.1 through 5.5.x. CI builds with 5.5.6. The prebuilt Zigbee libra
 ```bash
 . $IDF_PATH/export.sh
 cd esp32-panasonic-ac
-idf.py set-target esp32c6    # or esp32h2
+idf.py set-target esp32c6
 idf.py menuconfig            # Component config -> Panasonic CZ-TACG1
 idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor
@@ -77,10 +77,10 @@ Changing the fan speed clears Powerful / Quiet. The ESPHome component does the s
 
 ## CI
 
-`.github/workflows/ci.yml` builds ESP32-C6 and ESP32-H2 on every pull request and every push to `main`, and compiles the host codec test. The binaries stay in the Actions artifact for 14 days.
+`.github/workflows/ci.yml` builds the ESP32-C6 firmware on every pull request and every push to `main`, and compiles the host codec test. The binaries stay in the Actions artifact for 14 days.
 
 A `v*` tag attaches the same images to a GitHub Release. A green run means the firmware linked and the app fits in the 640 KB OTA slot. It does not mean the image was tested on an air conditioner.
 
 ## OTA
 
-The Zigbee OTA manufacturer code is `0x5041`. The ESP32-C6 image type is `0x0001`, and the ESP32-H2 image type is `0x0002`. Firmware `1.0.0` is stored as `0x01000000`.
+The Zigbee OTA manufacturer code is `0x5041`. The ESP32-C6 image type is `0x0001`. Firmware `1.0.0` is stored as `0x01000000`.

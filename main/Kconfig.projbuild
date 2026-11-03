@@ -6,7 +6,7 @@ config PANASONIC_UART_TX_GPIO
     range 0 30
     help
         GPIO that drives the air conditioner RX line through a 3.3 V to 5 V
-        level shifter. ESP32-C6 and ESP32-H2 devkits can use the default.
+        level shifter. An ESP32-C6 devkit can use the default.
 
 config PANASONIC_UART_RX_GPIO
     int "UART RX GPIO (ESP RX <- AC TX)"
@@ -24,7 +24,7 @@ config PANASONIC_FACTORY_RESET_GPIO
     range 0 30
     help
         Hold this pin low for 5 seconds to leave the Zigbee network.
-        GPIO9 is the BOOT button on most ESP32-C6 and ESP32-H2 boards.
+        GPIO9 is the BOOT button on most ESP32-C6 boards.
 
 config PANASONIC_INDOOR_OFFSET
     int "Indoor temperature offset (degree C)"
