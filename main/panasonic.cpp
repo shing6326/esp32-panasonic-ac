@@ -379,7 +379,7 @@ static void protocol_task(void *)
     while (true) {
         uint8_t tmp[64];
         // Short wait so a frame still arriving at 9600 baud is not cut in half.
-        // A frame is complete only after RX_GAP_MS of silence, same as the ESPHome driver.
+        // A frame is complete after RX_GAP_MS of silence.
         int n = uart_read_bytes(UART, tmp, sizeof(tmp), pdMS_TO_TICKS(RX_GAP_MS));
         int64_t now = now_ms();
         if (n > 0) {

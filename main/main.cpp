@@ -560,97 +560,101 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
     return ESP_OK;
 }
 
-static const esp_partition_t *s_ota_partition = nullptr;
-static esp_ota_handle_t s_ota_handle = 0;
-static bool s_ota_tagid_received = false;
+struct OtaSession {
+    const esp_partition_t *slot;
+    esp_ota_handle_t handle;
+    uint32_t received;
+    uint32_t expected;
+    uint32_t app_size;
+    bool header_done;
+};
 
-static esp_err_t ota_extract_element(uint32_t total_size, const void *payload, uint16_t payload_size, void **outbuf,
-                                     uint16_t *outlen)
-{
-    static uint16_t tagid = 0;
-    if (!s_ota_tagid_received) {
-        if (payload == nullptr || payload_size <= OTA_ELEMENT_HEADER_LEN) {
-            return ESP_ERR_INVALID_ARG;
-        }
-        tagid = *(const uint16_t *)payload;
-        uint32_t length = *(const uint32_t *)((const uint8_t *)payload + sizeof(tagid));
-        if ((length + OTA_ELEMENT_HEADER_LEN) != total_size) {
-            return ESP_ERR_INVALID_ARG;
-        }
-        s_ota_tagid_received = true;
-        *outbuf = (void *)((const uint8_t *)payload + OTA_ELEMENT_HEADER_LEN);
-        *outlen = payload_size - OTA_ELEMENT_HEADER_LEN;
-    } else {
-        *outbuf = (void *)payload;
-        *outlen = payload_size;
-    }
-    if (tagid != 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    return ESP_OK;
-}
+static OtaSession s_ota = {};
 
 static void ota_abort()
 {
-    if (s_ota_handle != 0) {
-        esp_ota_abort(s_ota_handle);
-        s_ota_handle = 0;
+    if (s_ota.handle != 0) {
+        esp_ota_abort(s_ota.handle);
     }
-    s_ota_tagid_received = false;
+    s_ota = {};
+}
+
+static esp_err_t ota_begin()
+{
+    ota_abort();
+    s_ota.slot = esp_ota_get_next_update_partition(nullptr);
+    if (s_ota.slot == nullptr) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    return esp_ota_begin(s_ota.slot, OTA_SIZE_UNKNOWN, &s_ota.handle);
+}
+
+// The stack delivers the upgrade image starting at its tag header: two bytes of
+// tag id, four bytes of body length, then the app image.
+static esp_err_t ota_feed(const uint8_t *chunk, uint16_t chunk_len, uint32_t image_size)
+{
+    if (!s_ota.header_done) {
+        if (chunk == nullptr || chunk_len <= OTA_ELEMENT_HEADER_LEN) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        uint16_t tag = (uint16_t)chunk[0] | ((uint16_t)chunk[1] << 8);
+        uint32_t body = (uint32_t)chunk[2] | ((uint32_t)chunk[3] << 8) | ((uint32_t)chunk[4] << 16) |
+                        ((uint32_t)chunk[5] << 24);
+        if (tag != 0 || body + OTA_ELEMENT_HEADER_LEN != image_size) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        s_ota.app_size = body;
+        s_ota.header_done = true;
+        chunk += OTA_ELEMENT_HEADER_LEN;
+        chunk_len = (uint16_t)(chunk_len - OTA_ELEMENT_HEADER_LEN);
+    }
+    if (chunk_len == 0) {
+        return ESP_OK;
+    }
+    if (chunk == nullptr || chunk_len > s_ota.app_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    esp_err_t err = esp_ota_write(s_ota.handle, chunk, chunk_len);
+    if (err == ESP_OK) {
+        s_ota.app_size -= chunk_len;
+    }
+    return err;
 }
 
 static esp_err_t zb_ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message_t message)
 {
-    static uint32_t total_size = 0;
-    static uint32_t offset = 0;
     if (message.info.status != ESP_ZB_ZCL_STATUS_SUCCESS) {
         return ESP_OK;
     }
     switch (message.upgrade_status) {
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_START:
         ESP_LOGI(TAG, "OTA start");
-        s_ota_tagid_received = false;
-        offset = 0;
-        s_ota_partition = esp_ota_get_next_update_partition(nullptr);
-        ESP_RETURN_ON_FALSE(s_ota_partition, ESP_ERR_NOT_FOUND, TAG, "No OTA partition");
-        return esp_ota_begin(s_ota_partition, OTA_SIZE_UNKNOWN, &s_ota_handle);
+        return ota_begin();
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_RECEIVE:
-        total_size = message.ota_header.image_size;
-        offset += message.payload_size;
-        if (message.payload_size && message.payload) {
-            uint16_t out_len = 0;
-            void *out_buf = nullptr;
-            esp_err_t ret = ota_extract_element(total_size, message.payload, message.payload_size, &out_buf, &out_len);
-            if (ret != ESP_OK) {
-                ota_abort();
-                return ret;
-            }
-            if (out_len) {
-                ret = esp_ota_write(s_ota_handle, out_buf, out_len);
-                if (ret != ESP_OK) {
-                    ota_abort();
-                    return ret;
-                }
-            }
+        s_ota.expected = message.ota_header.image_size;
+        if (message.payload_size == 0 || message.payload == nullptr) {
+            break;
         }
-        break;
-    case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_CHECK:
-        if (offset != total_size) {
+        if (ota_feed((const uint8_t *)message.payload, message.payload_size, s_ota.expected) != ESP_OK) {
             ota_abort();
-            offset = 0;
-            total_size = 0;
             return ESP_FAIL;
         }
-        offset = 0;
-        total_size = 0;
-        s_ota_tagid_received = false;
+        s_ota.received += message.payload_size;
+        break;
+    case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_CHECK:
+        if (s_ota.received != s_ota.expected || s_ota.app_size != 0) {
+            ota_abort();
+            return ESP_FAIL;
+        }
         break;
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_FINISH: {
-        esp_err_t ret = esp_ota_end(s_ota_handle);
+        esp_err_t ret = esp_ota_end(s_ota.handle);
+        s_ota.handle = 0;
         if (ret != ESP_OK) {
+            s_ota = {};
             return ret;
         }
-        ret = esp_ota_set_boot_partition(s_ota_partition);
+        ret = esp_ota_set_boot_partition(s_ota.slot);
         if (ret != ESP_OK) {
             return ret;
         }

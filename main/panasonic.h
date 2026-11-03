@@ -1,8 +1,4 @@
-// CZ-TACG1 / CN-CNT UART driver.
-//
-// Frame layout and field values follow the CNT implementation in
-// DomiStyle/esphome-panasonic-ac (MIT). This file is a new ESP-IDF port
-// for a Zigbee bridge; it does not speak the DNSK-P11 / CN-WLAN protocol.
+// CZ-TACG1 / CN-CNT UART driver. DNSK-P11 / CN-WLAN is not implemented.
 
 #pragma once
 

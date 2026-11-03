@@ -4,7 +4,7 @@ Replace the Panasonic **CZ-TACG1** Wi-Fi module with an ESP32-C6. The board conn
 
 Supported protocol: CZ-TACG1 / CN-CNT. DNSK-P11 / CN-WLAN is out of scope.
 
-The UART protocol comes from the CNT implementation in [esphome-panasonic-ac](https://github.com/DomiStyle/esphome-panasonic-ac). The Zigbee thermostat, router role, factory reset, and OTA client follow [esp32-midea-ac](https://github.com/pirsasha/esp32-midea-ac).
+This repository is MIT licensed. A build downloads Espressif's Zigbee libraries, and those libraries keep their own licenses.
 
 ## Features
 
@@ -73,7 +73,7 @@ Home Assistant shows a thermostat. Fan speed, swing, Powerful / Quiet, nanoeX, a
 
 nanoeX, Eco, ECONAVI, and Mild Dry map to separate fields in the CZ-TACG1 status bytes. Leave a feature off when the remote has no button for it. The indoor unit may reject the command, and the result is undefined.
 
-Changing the fan speed clears Powerful / Quiet. The ESPHome component does the same, because those presets override the fan speed.
+Changing the fan speed clears Powerful / Quiet, because those presets share the fan field.
 
 ## CI
 
