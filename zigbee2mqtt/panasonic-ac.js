@@ -216,6 +216,7 @@ const toZigbee = {
             // Home Assistant publishes local_temperature as "" with climate commands.
             // The indoor temperature comes from the AC and is not writable.
         },
+        convertGet: async (entity) => readAttrs(entity, 'genAnalogInput', [ATTR.indoorTemp]),
     },
     occupied_cooling_setpoint: {
         key: ['occupied_cooling_setpoint', 'occupied_heating_setpoint', 'current_heating_setpoint', 'current_cooling_setpoint'],
