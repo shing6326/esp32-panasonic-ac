@@ -244,6 +244,7 @@ module.exports = {
     model: 'ZB-PANASONIC-AC',
     vendor: 'Custom devices (DiY)',
     description: 'Panasonic CZ-TACG1 (CN-CNT) air conditioner controller (ESP32-C6)',
+    ota: true,
     fromZigbee: [fromZigbeeAcAnalog, fromZigbeeThermostat],
     toZigbee: [
         toZigbee.state,
