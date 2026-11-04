@@ -92,7 +92,7 @@ static uint8_t thermostat_system_mode = ESP_ZB_ZCL_THERMOSTAT_SYSTEM_MODE_OFF;
 static uint8_t thermostat_running_mode = 0x00;
 static uint8_t thermostat_ac_type = 0x04;
 static uint8_t thermostat_louver_position = ESP_ZB_ZCL_THERMOSTAT_LOUVER_FULLY_CLOSED;
-static uint32_t firmware_version = 0x01000500;  // 1.0.5
+static uint32_t firmware_version = 0x01000600;  // 1.0.6
 
 static int16_t celsius_to_zcl(float celsius)
 {
@@ -790,7 +790,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ret);
     xTaskCreate(factory_reset_button_task, "factory_reset", 2048, nullptr, 5, nullptr);
 
-    ESP_LOGI(TAG, "ESP-PAC CZ-TACG1 Zigbee bridge 1.0.0");
+    ESP_LOGI(TAG, "ESP-PAC CZ-TACG1 Zigbee bridge 1.0.6");
 
     esp_zb_platform_config_t platform_config = {};
     platform_config.radio_config.radio_mode = ZB_RADIO_MODE_NATIVE;
