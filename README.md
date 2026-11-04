@@ -9,7 +9,7 @@ This repository is MIT licensed. A build downloads Espressif's Zigbee libraries,
 ## Features
 
 - Power, auto, cool, heat, dry, and fan
-- Target temperature 16–30°C in 0.5°C steps. Setting a temperature while the unit is off turns it on and restores the previous mode
+- Target temperature 16–30°C in 1°C steps. Setting a temperature while the unit is off turns it on and restores the previous mode
 - Fan speed auto / 1 / 2 / 3 / 4 / 5
 - Vertical, horizontal, and combined swing, plus fixed vane positions
 - Powerful and Quiet

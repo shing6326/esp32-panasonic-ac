@@ -221,7 +221,7 @@ const toZigbee = {
     occupied_cooling_setpoint: {
         key: ['occupied_cooling_setpoint', 'occupied_heating_setpoint', 'current_heating_setpoint', 'current_cooling_setpoint'],
         convertSet: async (entity, _key, value) => {
-            const temp = Math.round(Number(value) * 2) / 2;
+            const temp = Math.round(Number(value));
             if (!Number.isFinite(temp) || temp < 16 || temp > 30) throw new Error('Temperature must be 16..30');
             await writeAttr(entity, 'genAnalogInput', ATTR.targetTemp, temp, DATA_TYPE.single);
             return {state: {occupied_heating_setpoint: temp, occupied_cooling_setpoint: temp, state: 'ON'}};
@@ -262,7 +262,7 @@ module.exports = {
     ],
     exposes: [
         e.climate()
-            .withSetpoint('occupied_heating_setpoint', 16, 30, 0.5, ea.STATE_SET)
+            .withSetpoint('occupied_heating_setpoint', 16, 30, 1, ea.STATE_SET)
             .withLocalTemperature()
             .withSystemMode(['off', 'auto', 'cool', 'heat', 'dry', 'fan_only'], ea.STATE_SET),
         e.enum('fan_mode', ea.STATE_SET, ID_TO_FAN).withDescription('Fan speed'),
