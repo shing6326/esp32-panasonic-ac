@@ -63,9 +63,17 @@ external_converters:
   - panasonic-ac.js
 ```
 
-3. Restart Zigbee2MQTT and enable Permit join.
-4. After power-up the module joins as a router. The identity is `ESP-PAC` / `ZB-PANASONIC-AC`. A device paired with the earlier `Panasonic` manufacturer name has to leave the network and join again.
-5. If it was joined to another network, hold BOOT (GPIO9) for 5 seconds. That clears the Zigbee data and starts steering again. If permit-join is closed, steering retries after 1 s, 2 s, 5 s, then every 10 s.
+3. Restart Zigbee2MQTT.
+
+## Reset and pairing
+
+A new board joins by itself after power-up. A board that already belongs to a network stays there until it is reset.
+
+1. In the Zigbee2MQTT frontend, turn on **Permit join** and leave it open while the board looks for a network.
+2. Power the ESP32-C6 and wait until the firmware is running. Do not hold BOOT while the chip is resetting. GPIO9 is the download-mode strap, and holding it at reset stops the firmware from starting.
+3. To pair a board that has joined before, press and hold BOOT (GPIO9, active low) for 5 seconds. The firmware logs `Factory reset: leaving the Zigbee network`, erases the Zigbee network data, and starts steering. A shorter press does nothing. The IEEE address does not change, so Zigbee2MQTT shows the same device again.
+4. If permit join is closed, steering fails and retries after 1 second, 2 seconds, 5 seconds, then every 10 seconds. Open permit join and wait for the next attempt. Another power cycle is not required.
+5. The device joins as a router. The identity is `ESP-PAC` / `ZB-PANASONIC-AC`. A device paired with the earlier `Panasonic` manufacturer name has to leave the network and join again so Zigbee2MQTT loads this definition.
 
 Home Assistant shows a thermostat. Fan speed, swing, Powerful / Quiet, nanoeX, and the other controls appear as additional entities on the same device.
 
