@@ -243,7 +243,7 @@ module.exports = {
     fingerprint: [{modelID: 'ZB-PANASONIC-AC', manufacturerName: 'ESP-PAC'}],
     model: 'ZB-PANASONIC-AC',
     vendor: 'Custom devices (DiY)',
-    description: '[Panasonic CZ-TACG1 (CN-CNT) air conditioner controller (ESP32-C6) https://github.com/shing6326/esp32-panasonic-ac](https://github.com/shing6326/esp32-panasonic-ac)',
+    description: 'Panasonic CZ-TACG1 (CN-CNT) air conditioner controller (ESP32-C6)',
     ota: true,
     fromZigbee: [fromZigbeeAcAnalog, fromZigbeeThermostat],
     toZigbee: [
