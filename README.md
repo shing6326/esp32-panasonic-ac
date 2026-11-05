@@ -55,15 +55,21 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 ## Zigbee2MQTT
 
-1. Copy `zigbee2mqtt/panasonic-ac.js` into the Zigbee2MQTT `data/` directory.
-2. Add this to `configuration.yaml`:
+1. Copy the contents of `zigbee2mqtt/` into `/root/config/zigbee2mqtt/`. That places `external_converters/panasonic-ac.js` and `device_icons/ZB-PANASONIC-AC.png` beside `configuration.yaml`. Zigbee2MQTT loads every `.js` file in `external_converters`. Do not add an `external_converters` list to `configuration.yaml`.
+2. On Zigbee2MQTT 2.11.0 or later, a new installation does not load that directory until external JavaScript is enabled:
 
 ```yaml
-external_converters:
-  - panasonic-ac.js
+advanced:
+  enable_external_js: true
 ```
 
-3. Restart Zigbee2MQTT.
+3. Restart Zigbee2MQTT. After the built-in definition is released, delete `external_converters/panasonic-ac.js` so the two definitions do not both match the device.
+
+## Device icon
+
+Zigbee2MQTT selects the picture from the device `model`. Every `ZB-PANASONIC-AC` uses `https://www.zigbee2mqtt.io/images/devices/ZB-PANASONIC-AC.png` once that file is published. No IEEE address is required, and a newly paired board picks it up on its own.
+
+A file in `device_icons` does not apply to the whole model. Zigbee2MQTT treats that directory as a per-device override, so each board still needs its own `icon: device_icons/ZB-PANASONIC-AC.png` entry. `device_options.icon` is also the wrong place: it would replace the picture of every device on the network.
 
 ## Reset and pairing
 
